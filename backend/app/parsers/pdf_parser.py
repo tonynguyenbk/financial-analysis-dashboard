@@ -920,8 +920,11 @@ class PDFParser(FinancialStatementParser):
         mapping = get_statement_mapping()
         mapped_rows: list[dict[str, Any]] = []
         for row in rows:
+            row = self._repair_statement_table_row_code(row, statement_key, template_key)
             item = self._find_statement_mapping_item(row, statement_key, template_key)
             if item is None:
+                if self._statement_has_template_mapping(statement_key, template_key):
+                    continue
                 mapped_rows.append(row)
                 continue
 
@@ -955,6 +958,34 @@ class PDFParser(FinancialStatementParser):
 
         for candidate_key in dict.fromkeys(candidates):
             item = mapping.find_by_label(candidate_key, row.get("label"))
+            if item is not None:
+                return item
+        return None
+
+    def _statement_has_template_mapping(self, statement_key: str, template_key: str | None = None) -> bool:
+        mapping = get_statement_mapping()
+        candidate_keys = self._statement_mapping_candidate_keys(statement_key, template_key)
+        return any(item.statement_key in candidate_keys for item in mapping.items)
+
+    def _statement_mapping_candidate_keys(
+        self,
+        statement_key: str,
+        template_key: str | None = None,
+    ) -> list[str]:
+        candidates = [template_key or statement_key]
+        if statement_key == "cash_flow":
+            candidates.extend(["cash_flow_indirect", "cash_flow_direct", "cash_flow"])
+        return list(dict.fromkeys(candidate for candidate in candidates if candidate))
+
+    def _find_mapping_item_by_code(
+        self,
+        statement_key: str,
+        code: Any,
+        template_key: str | None = None,
+    ) -> StatementMappingItem | None:
+        mapping = get_statement_mapping()
+        for candidate_key in self._statement_mapping_candidate_keys(statement_key, template_key):
+            item = mapping.get(candidate_key, code)
             if item is not None:
                 return item
         return None
@@ -1117,7 +1148,11 @@ class PDFParser(FinancialStatementParser):
         if not candidates:
             return None
 
-        return min(candidates, key=self._statement_row_noise_score)
+        repaired_candidates = [
+            self._repair_statement_table_row_code(row, statement_key)
+            for row in candidates
+        ]
+        return min(repaired_candidates, key=self._statement_row_noise_score)
 
     def _build_statement_table_row(
         self,
@@ -1174,6 +1209,8 @@ class PDFParser(FinancialStatementParser):
             label = self._clean_statement_label(label_source, statement_key)
             code = self._infer_statement_code_from_label(label, statement_key)
             if code is None:
+                code = self._infer_statement_code_from_mapped_label(label, statement_key)
+            if code is None:
                 return None
         else:
             label = self._clean_statement_label(match.group("label"), statement_key)
@@ -1219,6 +1256,12 @@ class PDFParser(FinancialStatementParser):
         )
         for alias, code in code_aliases:
             if alias in normalized:
+                return code
+        return None
+
+    def _infer_statement_code_from_mapped_label(self, label: str, statement_key: str) -> str | None:
+        for code in self._statement_code_tokens(label):
+            if self._find_mapping_item_by_code(statement_key, code) is not None:
                 return code
         return None
 
@@ -1433,6 +1476,61 @@ class PDFParser(FinancialStatementParser):
         if str(row.get("note") or "").isdigit():
             score -= 2
         return score
+
+    def _repair_statement_table_row_code(
+        self,
+        row: dict[str, Any],
+        statement_key: str,
+        template_key: str | None = None,
+    ) -> dict[str, Any]:
+        current_code = str(row.get("code") or "").strip()
+        current_note = str(row.get("note") or "").strip() if row.get("note") is not None else None
+        current_label = str(row.get("label") or "")
+
+        if self._find_mapping_item_by_code(statement_key, current_code, template_key) is not None:
+            return row
+
+        label_code = self._first_mapped_code_token(current_label, statement_key, template_key)
+        note_code = self._first_mapped_code_token(current_note or "", statement_key, template_key)
+        selected_code = label_code or note_code
+        if selected_code is None:
+            return row
+
+        repaired = row.copy()
+        repaired["code"] = selected_code
+
+        if label_code is not None:
+            repaired["label"] = self._remove_statement_code_token_from_label(current_label, selected_code)
+            if current_note is None and current_code and current_code != selected_code:
+                repaired["note"] = current_code
+        elif note_code is not None:
+            repaired["note"] = None
+
+        return repaired
+
+    def _first_mapped_code_token(
+        self,
+        text: str,
+        statement_key: str,
+        template_key: str | None = None,
+    ) -> str | None:
+        for code in self._statement_code_tokens(text):
+            if self._find_mapping_item_by_code(statement_key, code, template_key) is not None:
+                return code
+        return None
+
+    def _statement_code_tokens(self, text: str) -> list[str]:
+        tokens: list[str] = []
+        for match in re.finditer(r"(?<![\d.,])(\d{2,3})(?![\d.,])", str(text or "")):
+            token = match.group(1)
+            if token not in tokens:
+                tokens.append(token)
+        return tokens
+
+    def _remove_statement_code_token_from_label(self, label: str, code: str) -> str:
+        cleaned = re.sub(rf"(?<![\d.,]){re.escape(code)}(?![\d.,])", " ", label, count=1)
+        cleaned = self._clean_statement_label(cleaned)
+        return cleaned or label
 
     def _repair_embedded_statement_code(
         self,
