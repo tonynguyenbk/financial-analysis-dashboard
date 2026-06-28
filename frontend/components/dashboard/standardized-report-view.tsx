@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, type PointerEvent } from "react";
 import { FileSpreadsheet, FileText } from "lucide-react";
 
 import { copy, localeByLanguage, type Language } from "@/lib/i18n";
@@ -20,6 +21,7 @@ interface StandardizedReportViewProps {
 
 type SectionKey = "balance_sheet" | "income_statement" | "cash_flow";
 type EditableCellKind = "note" | "value";
+type StatementColumnWidthMap = Record<string, number>;
 
 interface EditableCellChange {
   tableIndex: number;
@@ -53,6 +55,12 @@ const sectionFields: Record<SectionKey, string[]> = {
 };
 
 const hiddenMetadataKeys = new Set(["extracted_pages", "report_navigation", "statement_tables", "notes"]);
+const defaultStatementColumnWidths: Record<string, number> = {
+  label: 520,
+  code: 96,
+  note: 120,
+  value: 220
+};
 
 export function StandardizedReportView({ statement, language, onStatementChange }: StandardizedReportViewProps) {
   const t = copy[language];
@@ -184,6 +192,14 @@ function MainStatementTables({
   onCellChange: (change: EditableCellChange) => void;
 }) {
   const labels = statementTableLabels[language];
+  const [columnWidths, setColumnWidths] = useState<StatementColumnWidthMap>({});
+
+  function handleColumnResize(tableKey: string, columnKey: string, width: number) {
+    setColumnWidths((current) => ({
+      ...current,
+      [statementColumnWidthKey(tableKey, columnKey)]: width
+    }));
+  }
 
   return (
     <div className="grid gap-4">
@@ -199,6 +215,22 @@ function MainStatementTables({
         const itemLabel = getColumnLabel(table, "label", labels.item);
         const codeLabel = getColumnLabel(table, "code", labels.code);
         const noteLabel = getColumnLabel(table, "note", labels.note);
+        const tableColumns = [
+          { key: "label", label: itemLabel, align: "left" as const, minWidth: 280 },
+          { key: "code", label: codeLabel, align: "center" as const, minWidth: 76 },
+          { key: "note", label: noteLabel, align: "center" as const, minWidth: 90 },
+          ...valueColumns.map((column) => ({
+            key: column.key,
+            label: column.label,
+            align: "right" as const,
+            minWidth: 140
+          }))
+        ];
+        const resolvedWidths = tableColumns.map((column) =>
+          getStatementColumnWidth(table.key, column.key, columnWidths)
+        );
+        const tableWidth = resolvedWidths.reduce((total, width) => total + width, 0);
+
         return (
           <section key={table.key} className="rounded-lg border border-line bg-surface p-4 shadow-soft">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -216,16 +248,26 @@ function MainStatementTables({
             </div>
 
             <div className="mt-4 overflow-x-auto">
-              <table className="w-full min-w-[980px] border-separate border-spacing-0 text-left text-sm">
+              <table
+                className="table-fixed border-separate border-spacing-0 text-left text-sm"
+                style={{ width: `${tableWidth}px`, minWidth: "100%" }}
+              >
+                <colgroup>
+                  {tableColumns.map((column, columnIndex) => (
+                    <col key={column.key} style={{ width: `${resolvedWidths[columnIndex]}px` }} />
+                  ))}
+                </colgroup>
                 <thead>
                   <tr className="text-ink/56">
-                    <th className="min-w-[360px] border-b border-line px-3 py-3 font-semibold">{itemLabel}</th>
-                    <th className="w-24 border-b border-line px-3 py-3 text-center font-semibold">{codeLabel}</th>
-                    <th className="w-28 border-b border-line px-3 py-3 text-center font-semibold">{noteLabel}</th>
-                    {valueColumns.map((column) => (
-                      <th key={column.key} className="w-40 border-b border-line px-3 py-3 text-right font-semibold">
-                        {column.label}
-                      </th>
+                    {tableColumns.map((column, columnIndex) => (
+                      <ResizableStatementHeader
+                        key={column.key}
+                        label={column.label}
+                        align={column.align}
+                        width={resolvedWidths[columnIndex]}
+                        minWidth={column.minWidth}
+                        onResize={(width) => handleColumnResize(table.key, column.key, width)}
+                      />
                     ))}
                   </tr>
                 </thead>
@@ -290,6 +332,65 @@ function MainStatementTables({
         );
       })}
     </div>
+  );
+}
+
+function ResizableStatementHeader({
+  label,
+  align,
+  width,
+  minWidth,
+  onResize
+}: {
+  label: string;
+  align: "left" | "center" | "right";
+  width: number;
+  minWidth: number;
+  onResize: (width: number) => void;
+}) {
+  function handlePointerDown(event: PointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const startX = event.clientX;
+    const startWidth = width;
+    const originalCursor = document.body.style.cursor;
+    const originalUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    function handlePointerMove(moveEvent: globalThis.PointerEvent) {
+      const nextWidth = Math.max(minWidth, startWidth + moveEvent.clientX - startX);
+      onResize(Math.round(nextWidth));
+    }
+
+    function handlePointerUp() {
+      document.body.style.cursor = originalCursor;
+      document.body.style.userSelect = originalUserSelect;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+  }
+
+  return (
+    <th
+      className={`relative border-b border-line px-3 py-3 font-semibold ${
+        align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left"
+      }`}
+      style={{ width: `${width}px`, minWidth: `${minWidth}px` }}
+      scope="col"
+    >
+      <span className="block truncate pr-2">{label}</span>
+      <button
+        type="button"
+        className="absolute right-0 top-2 h-[calc(100%-16px)] w-3 cursor-col-resize rounded-sm border-r border-line/80 transition hover:border-gold hover:bg-gold/20 active:border-gold"
+        aria-label={`Resize ${label}`}
+        onPointerDown={handlePointerDown}
+      />
+    </th>
   );
 }
 
@@ -674,6 +775,22 @@ function getStatementTables(value: unknown): StatementTable[] {
 
 function getEditedStatementCells(value: unknown): Set<string> {
   return new Set(Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []);
+}
+
+function getStatementColumnWidth(
+  tableKey: string,
+  columnKey: string,
+  widths: StatementColumnWidthMap
+): number {
+  const storedWidth = widths[statementColumnWidthKey(tableKey, columnKey)];
+  if (typeof storedWidth === "number" && Number.isFinite(storedWidth)) {
+    return storedWidth;
+  }
+  return defaultStatementColumnWidths[columnKey] ?? defaultStatementColumnWidths.value;
+}
+
+function statementColumnWidthKey(tableKey: string, columnKey: string): string {
+  return `${tableKey}:${columnKey}`;
 }
 
 function updateStatementTableCell(statement: FinancialStatement, change: EditableCellChange): FinancialStatement {
