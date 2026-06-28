@@ -1075,14 +1075,14 @@ class PDFParser(FinancialStatementParser):
 
                 if STATEMENT_ROW_PATTERN.match(line):
                     if pending_line:
-                        row = self._parse_statement_table_row(
+                        row = self._parse_statement_table_row_with_hint(
                             pending_line,
                             pending_page or page_index + 1,
                             periods,
                             statement_key,
+                            pending_label_hint,
                         )
                         if row:
-                            row = self._apply_statement_label_hint(row, pending_label_hint)
                             rows.append(row)
                             pending_label_hint = None
                     pending_line = line
@@ -1090,35 +1090,71 @@ class PDFParser(FinancialStatementParser):
                 elif pending_line:
                     pending_line = f"{pending_line} {line}"
                 else:
-                    row = self._parse_statement_table_row(line, page_index + 1, periods, statement_key)
+                    row = self._parse_statement_table_row_with_hint(
+                        line,
+                        page_index + 1,
+                        periods,
+                        statement_key,
+                        pending_label_hint,
+                    )
                     if row:
-                        row = self._apply_statement_label_hint(row, pending_label_hint)
                         rows.append(row)
                         pending_label_hint = None
                     elif self._looks_like_statement_label_hint(line):
                         pending_label_hint = self._merge_statement_label_hint(pending_label_hint, line)
 
                 if pending_line:
-                    row = self._parse_statement_table_row(
+                    row = self._parse_statement_table_row_with_hint(
                         pending_line,
                         pending_page or page_index + 1,
                         periods,
                         statement_key,
+                        pending_label_hint,
                     )
                     if row:
-                        row = self._apply_statement_label_hint(row, pending_label_hint)
                         rows.append(row)
                         pending_label_hint = None
                         pending_line = None
                         pending_page = None
 
         if pending_line:
-            row = self._parse_statement_table_row(pending_line, pending_page or 0, periods, statement_key)
+            row = self._parse_statement_table_row_with_hint(
+                pending_line,
+                pending_page or 0,
+                periods,
+                statement_key,
+                pending_label_hint,
+            )
             if row:
-                row = self._apply_statement_label_hint(row, pending_label_hint)
                 rows.append(row)
 
         return self._deduplicate_statement_rows(rows)
+
+    def _parse_statement_table_row_with_hint(
+        self,
+        line: str,
+        page: int,
+        periods: list[str],
+        statement_key: str,
+        label_hint: str | None,
+    ) -> dict[str, Any] | None:
+        row = self._parse_statement_table_row(line, page, periods, statement_key)
+        if row:
+            return self._apply_statement_label_hint(row, label_hint)
+
+        if not label_hint:
+            return None
+
+        hinted_row = self._parse_statement_table_row(
+            f"{label_hint} {line}",
+            page,
+            periods,
+            statement_key,
+        )
+        if hinted_row:
+            hinted_row["raw_text"] = line
+            hinted_row["raw_label_hint"] = label_hint
+        return hinted_row
 
     def _parse_statement_table_row(
         self,
@@ -1245,6 +1281,21 @@ class PDFParser(FinancialStatementParser):
 
         normalized = normalize_label(label)
         code_aliases = (
+            ("total resources", "440"),
+            ("total liabilities and owners equity", "440"),
+            ("total liabilities and equity", "440"),
+            ("tong cong nguon von", "440"),
+            ("nguon von", "440"),
+            ("total assets", "270"),
+            ("tong cong tai san", "270"),
+            ("tong tai san", "270"),
+            ("owners equity", "400"),
+            ("owner s equity", "400"),
+            ("von chu so huu", "400"),
+            ("total liabilities", "300"),
+            ("tong cong no phai tra", "300"),
+            ("tong no phai tra", "300"),
+            ("no phai tra", "300"),
             ("phai thu ngan han cua khach hang", "131"),
             ("phai thu khach hang", "131"),
             ("tra truoc cho nguoi ban", "132"),
@@ -1492,7 +1543,8 @@ class PDFParser(FinancialStatementParser):
 
         label_code = self._first_mapped_code_token(current_label, statement_key, template_key)
         note_code = self._first_mapped_code_token(current_note or "", statement_key, template_key)
-        selected_code = label_code or note_code
+        alias_code = self._infer_statement_code_from_label(current_label, statement_key)
+        selected_code = label_code or note_code or alias_code
         if selected_code is None:
             return row
 
