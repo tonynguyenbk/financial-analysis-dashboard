@@ -199,7 +199,11 @@ export function DashboardShell() {
         ) : null}
 
         {statement ? (
-          <StandardizedReportView statement={statement} language={language} />
+          <StandardizedReportView
+            statement={statement}
+            language={language}
+            onStatementChange={setStatement}
+          />
         ) : null}
 
         {dashboard?.warnings?.length ? (

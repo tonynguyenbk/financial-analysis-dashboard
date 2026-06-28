@@ -1,3 +1,5 @@
+"use client";
+
 import { FileSpreadsheet, FileText } from "lucide-react";
 
 import { copy, localeByLanguage, type Language } from "@/lib/i18n";
@@ -13,9 +15,20 @@ import type {
 interface StandardizedReportViewProps {
   statement: FinancialStatement;
   language: Language;
+  onStatementChange?: (statement: FinancialStatement) => void;
 }
 
 type SectionKey = "balance_sheet" | "income_statement" | "cash_flow";
+type EditableCellKind = "note" | "value";
+
+interface EditableCellChange {
+  tableIndex: number;
+  tableKey: string;
+  rowIndex: number;
+  columnKey: string;
+  kind: EditableCellKind;
+  value: string | number | null;
+}
 
 const sectionFields: Record<SectionKey, string[]> = {
   balance_sheet: [
@@ -41,7 +54,7 @@ const sectionFields: Record<SectionKey, string[]> = {
 
 const hiddenMetadataKeys = new Set(["extracted_pages", "report_navigation", "statement_tables", "notes"]);
 
-export function StandardizedReportView({ statement, language }: StandardizedReportViewProps) {
+export function StandardizedReportView({ statement, language, onStatementChange }: StandardizedReportViewProps) {
   const t = copy[language];
   const locale = localeByLanguage[language];
   const metadataEntries = Object.entries(statement.metadata ?? {}).filter(
@@ -51,6 +64,11 @@ export function StandardizedReportView({ statement, language }: StandardizedRepo
   const extractedPages = getExtractedPages(statement.metadata?.extracted_pages);
   const reportNavigation = getReportNavigation(statement.metadata?.report_navigation);
   const statementTables = getStatementTables(statement.metadata?.statement_tables);
+  const editedCells = getEditedStatementCells(statement.metadata?.statement_table_edits);
+
+  function handleStatementTableCellChange(change: EditableCellChange) {
+    onStatementChange?.(updateStatementTableCell(statement, change));
+  }
 
   return (
     <div className="grid gap-4">
@@ -81,7 +99,13 @@ export function StandardizedReportView({ statement, language }: StandardizedRepo
 
       {statementTables.length ? (
         <>
-          <MainStatementTables tables={statementTables} language={language} locale={locale} />
+          <MainStatementTables
+            tables={statementTables}
+            language={language}
+            locale={locale}
+            editedCells={editedCells}
+            onCellChange={handleStatementTableCellChange}
+          />
           <StatementNotes noteText={noteText} language={language} />
         </>
       ) : (
@@ -149,11 +173,15 @@ export function StandardizedReportView({ statement, language }: StandardizedRepo
 function MainStatementTables({
   tables,
   language,
-  locale
+  locale,
+  editedCells,
+  onCellChange
 }: {
   tables: StatementTable[];
   language: Language;
   locale: string;
+  editedCells: Set<string>;
+  onCellChange: (change: EditableCellChange) => void;
 }) {
   const labels = statementTableLabels[language];
 
@@ -164,7 +192,7 @@ function MainStatementTables({
         <p className="mt-2 text-sm leading-6 text-ink/62">{labels.body}</p>
       </section>
 
-      {tables.map((table) => {
+      {tables.map((table, tableIndex) => {
         const valueColumns = table.columns.filter(
           (column) => !["code", "label", "note"].includes(column.key)
         );
@@ -202,8 +230,8 @@ function MainStatementTables({
                   </tr>
                 </thead>
                 <tbody>
-                  {table.rows.map((row) => (
-                    <tr key={`${table.key}-${row.page ?? "p"}-${row.code}-${row.label}`}>
+                  {table.rows.map((row, rowIndex) => (
+                    <tr key={`${table.key}-${row.page ?? "p"}-${row.code}-${row.label}-${rowIndex}`}>
                       <td
                         className="border-b border-line py-3 pr-3 font-medium text-ink"
                         style={{ paddingLeft: `${12 + Math.max(0, (row.level ?? 1) - 1) * 14}px` }}
@@ -212,10 +240,45 @@ function MainStatementTables({
                         {row.label}
                       </td>
                       <td className="border-b border-line px-3 py-3 text-center font-semibold text-ink/68">{row.code}</td>
-                      <td className="border-b border-line px-3 py-3 text-center text-ink/62">{row.note ?? "-"}</td>
+                      <td className="border-b border-line px-3 py-3 text-center text-ink/62">
+                        <EditableStatementCell
+                          align="center"
+                          value={row.note ?? null}
+                          displayValue={row.note ?? "-"}
+                          edited={editedCells.has(statementCellKey(table.key, rowIndex, "note"))}
+                          onCommit={(value) =>
+                            onCellChange({
+                              tableIndex,
+                              tableKey: table.key,
+                              rowIndex,
+                              columnKey: "note",
+                              kind: "note",
+                              value
+                            })
+                          }
+                        />
+                      </td>
                       {valueColumns.map((column) => (
                         <td key={`${row.code}-${column.key}`} className="border-b border-line px-3 py-3 text-right font-mono text-ink/78">
-                          {formatStatementNumber(row.values[column.key], locale)}
+                          <EditableStatementCell
+                            align="right"
+                            value={row.values[column.key] ?? null}
+                            displayValue={formatStatementNumber(row.values[column.key], locale)}
+                            edited={editedCells.has(statementCellKey(table.key, rowIndex, `value:${column.key}`))}
+                            onCommit={(value) => {
+                              const parsedValue = parseEditableNumber(value);
+                              if (parsedValue !== undefined) {
+                                onCellChange({
+                                  tableIndex,
+                                  tableKey: table.key,
+                                  rowIndex,
+                                  columnKey: column.key,
+                                  kind: "value",
+                                  value: parsedValue
+                                });
+                              }
+                            }}
+                          />
                         </td>
                       ))}
                     </tr>
@@ -227,6 +290,50 @@ function MainStatementTables({
         );
       })}
     </div>
+  );
+}
+
+function EditableStatementCell({
+  value,
+  displayValue,
+  edited,
+  align,
+  onCommit
+}: {
+  value: string | number | null;
+  displayValue: string;
+  edited: boolean;
+  align: "center" | "right";
+  onCommit: (value: string) => void;
+}) {
+  return (
+    <input
+      key={`${displayValue}-${edited ? "edited" : "clean"}`}
+      type="text"
+      defaultValue={displayValue}
+      className={`h-9 w-full min-w-0 rounded-md border bg-transparent px-2 text-sm text-ink outline-none transition focus:border-marine focus:bg-paper focus:ring-2 focus:ring-marine/20 ${
+        align === "right" ? "text-right font-mono" : "text-center"
+      } ${
+        edited
+          ? "border-gold bg-gold/10 ring-1 ring-gold/40"
+          : "border-transparent hover:border-line"
+      }`}
+      onBlur={(event) => {
+        const nextValue = event.currentTarget.value;
+        if (!editableValuesEqual(value, nextValue)) {
+          onCommit(nextValue);
+        }
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.currentTarget.blur();
+        }
+        if (event.key === "Escape") {
+          event.currentTarget.value = displayValue;
+          event.currentTarget.blur();
+        }
+      }}
+    />
   );
 }
 
@@ -564,6 +671,210 @@ function getStatementTables(value: unknown): StatementTable[] {
     })
     .filter((table): table is StatementTable => table !== null);
 }
+
+function getEditedStatementCells(value: unknown): Set<string> {
+  return new Set(Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []);
+}
+
+function updateStatementTableCell(statement: FinancialStatement, change: EditableCellChange): FinancialStatement {
+  const tables = getStatementTables(statement.metadata?.statement_tables);
+  const table = tables[change.tableIndex];
+  const row = table?.rows[change.rowIndex];
+  if (!table || !row || table.key !== change.tableKey) {
+    return statement;
+  }
+
+  const updatedTables = tables.map((currentTable, tableIndex) => {
+    if (tableIndex !== change.tableIndex) {
+      return currentTable;
+    }
+
+    return {
+      ...currentTable,
+      rows: currentTable.rows.map((currentRow, rowIndex) => {
+        if (rowIndex !== change.rowIndex) {
+          return currentRow;
+        }
+
+        if (change.kind === "note") {
+          const noteValue = normalizeEditableNote(String(change.value ?? ""));
+          return {
+            ...currentRow,
+            note: noteValue
+          };
+        }
+
+        return {
+          ...currentRow,
+          values: {
+            ...currentRow.values,
+            [change.columnKey]: typeof change.value === "number" ? change.value : null
+          }
+        };
+      })
+    };
+  });
+
+  const editKey = statementCellKey(
+    change.tableKey,
+    change.rowIndex,
+    change.kind === "note" ? "note" : `value:${change.columnKey}`
+  );
+  const editedCells = getEditedStatementCells(statement.metadata?.statement_table_edits);
+  editedCells.add(editKey);
+
+  const updatedStatement: FinancialStatement = {
+    ...statement,
+    metadata: {
+      ...(statement.metadata ?? {}),
+      statement_tables: updatedTables,
+      statement_table_edits: Array.from(editedCells)
+    }
+  };
+
+  if (change.kind !== "value") {
+    return updatedStatement;
+  }
+
+  return {
+    ...updatedStatement,
+    periods: updatePeriodsFromStatementTableCell(
+      statement.periods,
+      change.tableKey,
+      row.code,
+      change.columnKey,
+      typeof change.value === "number" ? change.value : null
+    )
+  };
+}
+
+function updatePeriodsFromStatementTableCell(
+  periods: FinancialPeriod[],
+  tableKey: string,
+  code: string,
+  periodKey: string,
+  value: number | null
+): FinancialPeriod[] {
+  const fieldPath = statementCodeFieldPaths[tableKey]?.[code];
+  if (!fieldPath) {
+    return periods;
+  }
+
+  return periods.map((period) => {
+    const matchesPeriod =
+      period.period === periodKey ||
+      (period.fiscal_year !== null && period.fiscal_year !== undefined && String(period.fiscal_year) === periodKey);
+    if (!matchesPeriod) {
+      return period;
+    }
+
+    return {
+      ...period,
+      [fieldPath.section]: {
+        ...period[fieldPath.section],
+        [fieldPath.field]: value
+      }
+    };
+  });
+}
+
+function statementCellKey(tableKey: string, rowIndex: number, columnKey: string): string {
+  return `${tableKey}:${rowIndex}:${columnKey}`;
+}
+
+function normalizeEditableNote(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed && trimmed !== "-" ? trimmed : null;
+}
+
+function parseEditableNumber(value: string): number | null | undefined {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "-") {
+    return null;
+  }
+
+  const negativeByParentheses = trimmed.startsWith("(") && trimmed.endsWith(")");
+  let cleaned = trimmed.replace(/[()]/g, "").replace(/\s/g, "");
+  cleaned = cleaned.replace(/[^0-9,.-]/g, "");
+  if (!cleaned || cleaned === "-" || cleaned === "." || cleaned === ",") {
+    return undefined;
+  }
+
+  const negativeBySign = cleaned.startsWith("-");
+  if (negativeBySign) {
+    cleaned = cleaned.slice(1);
+  }
+
+  cleaned = normalizeEditableNumberSeparators(cleaned);
+  const parsed = Number(cleaned);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+
+  return negativeByParentheses || negativeBySign ? -parsed : parsed;
+}
+
+function normalizeEditableNumberSeparators(value: string): string {
+  if (value.includes(",") && value.includes(".")) {
+    return value.lastIndexOf(",") > value.lastIndexOf(".")
+      ? value.replace(/\./g, "").replace(",", ".")
+      : value.replace(/,/g, "");
+  }
+
+  if (value.includes(".")) {
+    const parts = value.split(".");
+    if (parts.length > 2 || (parts.length === 2 && parts[1]?.length === 3 && parts[0].length <= 3)) {
+      return parts.join("");
+    }
+  }
+
+  if (value.includes(",")) {
+    const parts = value.split(",");
+    if (parts.length > 2 || (parts.length === 2 && parts[1]?.length === 3 && parts[0].length <= 3)) {
+      return parts.join("");
+    }
+    return value.replace(",", ".");
+  }
+
+  return value;
+}
+
+function editableValuesEqual(currentValue: string | number | null, nextValue: string): boolean {
+  if (typeof currentValue === "number") {
+    const parsed = parseEditableNumber(nextValue);
+    return parsed !== undefined && parsed === currentValue;
+  }
+
+  const normalizedCurrent = normalizeEditableNote(currentValue ?? "");
+  const normalizedNext = normalizeEditableNote(nextValue);
+  return normalizedCurrent === normalizedNext;
+}
+
+const statementCodeFieldPaths: Record<string, Record<string, { section: SectionKey; field: string }>> = {
+  financial_position: {
+    "100": { section: "balance_sheet", field: "current_assets" },
+    "130": { section: "balance_sheet", field: "accounts_receivable" },
+    "131": { section: "balance_sheet", field: "accounts_receivable" },
+    "140": { section: "balance_sheet", field: "inventory" },
+    "141": { section: "balance_sheet", field: "inventory" },
+    "270": { section: "balance_sheet", field: "total_assets" },
+    "300": { section: "balance_sheet", field: "total_liabilities" },
+    "310": { section: "balance_sheet", field: "current_liabilities" },
+    "311": { section: "balance_sheet", field: "accounts_payable" },
+    "400": { section: "balance_sheet", field: "total_equity" }
+  },
+  income_statement: {
+    "10": { section: "income_statement", field: "net_revenue" },
+    "11": { section: "income_statement", field: "cost_of_goods_sold" },
+    "20": { section: "income_statement", field: "gross_profit" },
+    "23": { section: "income_statement", field: "interest_expense" },
+    "30": { section: "income_statement", field: "ebit" },
+    "60": { section: "income_statement", field: "net_income" }
+  },
+  cash_flow: {
+    "20": { section: "cash_flow", field: "operating_cash_flow" }
+  }
+};
 
 function formatStatementNumber(value: number | null | undefined, locale: string): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
