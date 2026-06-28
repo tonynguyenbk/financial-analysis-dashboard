@@ -1,0 +1,34 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      PDF_OCR_MAX_PAGES: "0"
+      PDF_OCR_LANGUAGES: vie
+      PDF_OCR_WORKERS: "2"
+      PDF_TOC_OCR_SCALE: "1.6"
+      OMP_THREAD_LIMIT: "1"
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend_parse_cache:/app/.cache/parse_jobs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:8000
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  backend_parse_cache:

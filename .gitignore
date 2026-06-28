@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+backend/.venv/
+
+# Local runtime files
+.env
+.env.*
+!.env.example
+*.log
+.cache/
+backend/.cache/
+reports/*.json
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+frontend/node_modules/
+frontend/.next/
+
+# Large manual fixtures / source documents
+backend/test_data/*.pdf
+!backend/test_data/pdf_upload_sample.pdf
+backend/test_data/*.doc
+backend/test_data/*.docx

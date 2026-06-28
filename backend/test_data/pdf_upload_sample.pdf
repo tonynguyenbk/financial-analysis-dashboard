@@ -1,0 +1,68 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 755 >>
+stream
+BT
+/F1 10 Tf
+72 740 Td
+14 TL
+(2022 2023 2024) Tj
+T*
+(current assets 470,000 520,000 580,000) Tj
+T*
+(inventory 126,000 140,000 155,000) Tj
+T*
+(accounts receivable 98,000 110,000 128,000) Tj
+T*
+(total assets 1,080,000 1,200,000 1,350,000) Tj
+T*
+(current liabilities 235,000 260,000 295,000) Tj
+T*
+(accounts payable 76,000 85,000 97,000) Tj
+T*
+(total liabilities 590,000 650,000 720,000) Tj
+T*
+(total equity 490,000 550,000 630,000) Tj
+T*
+(net revenue 820,000 950,000 1,120,000) Tj
+T*
+(gross profit 238,000 280,000 342,000) Tj
+T*
+(cost of goods sold 582,000 670,000 778,000) Tj
+T*
+(ebit 123,000 145,000 181,000) Tj
+T*
+(interest expense 29,000 32,000 35,000) Tj
+T*
+(net income 78,000 92,000 116,000) Tj
+T*
+(operating cash flow 69,000 108,000 121,000) Tj
+T*
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1117
+%%EOF

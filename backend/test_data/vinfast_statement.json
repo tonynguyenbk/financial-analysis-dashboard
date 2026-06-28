@@ -1,0 +1,110 @@
+{
+  "company": {
+    "name": "VinFast Auto Ltd.",
+    "ticker": "VFS",
+    "industry": "Electric Vehicles"
+  },
+  "currency": "VND",
+  "unit": "million",
+  "source_type": "sec",
+  "periods": [
+    {
+      "period": "2023",
+      "fiscal_year": 2023,
+      "balance_sheet": {
+        "current_assets": 50583489,
+        "inventory": 30141381,
+        "accounts_receivable": 469918,
+        "total_assets": 146857721,
+        "current_liabilities": 152036022,
+        "accounts_payable": 12146588,
+        "total_liabilities": 212269436,
+        "total_equity": -65411715
+      },
+      "income_statement": {
+        "net_revenue": 27883821,
+        "gross_profit": -13710911,
+        "cost_of_goods_sold": 41594732,
+        "ebit": -41970653,
+        "interest_expense": 13782105,
+        "net_income": -60250348
+      },
+      "cash_flow": {
+        "operating_cash_flow": -50270617
+      }
+    },
+    {
+      "period": "2024",
+      "fiscal_year": 2024,
+      "balance_sheet": {
+        "current_assets": 64781629,
+        "inventory": 27907030,
+        "accounts_receivable": 5605064,
+        "total_assets": 155966496,
+        "current_liabilities": 171508908,
+        "accounts_payable": 20791192,
+        "total_liabilities": 250871239,
+        "total_equity": -94904743
+      },
+      "income_statement": {
+        "net_revenue": 44019015,
+        "gross_profit": -25277639,
+        "cost_of_goods_sold": 69296654,
+        "ebit": -55399158,
+        "interest_expense": 19108150,
+        "net_income": -77354949
+      },
+      "cash_flow": {
+        "operating_cash_flow": -30468461
+      }
+    },
+    {
+      "period": "2025",
+      "fiscal_year": 2025,
+      "balance_sheet": {
+        "current_assets": 85439748,
+        "inventory": 34882649,
+        "accounts_receivable": 4670062,
+        "total_assets": 182622042,
+        "current_liabilities": 164758965,
+        "accounts_payable": 32630360,
+        "total_liabilities": 275017820,
+        "total_equity": -92395778
+      },
+      "income_statement": {
+        "net_revenue": 90178628,
+        "gross_profit": -40910520,
+        "cost_of_goods_sold": 131089148,
+        "ebit": -74094201,
+        "interest_expense": 22314507,
+        "net_income": -99582848
+      },
+      "cash_flow": {
+        "operating_cash_flow": -44461239
+      }
+    }
+  ],
+  "metadata": {
+    "schema_version": "0.1.0",
+    "source": "SEC EDGAR filings for VinFast Auto Ltd. (CIK 0001913510)",
+    "sources": [
+      {
+        "form": "20-F",
+        "filing_date": "2026-04-30",
+        "report_date": "2025-12-31",
+        "accession": "0001104659-26-052266",
+        "url": "https://www.sec.gov/Archives/edgar/data/1913510/000110465926052266/vfs-20251231x20f.htm",
+        "reports": ["R2.htm", "R4.htm", "R8.htm"]
+      },
+      {
+        "form": "20-F",
+        "filing_date": "2025-04-30",
+        "report_date": "2024-12-31",
+        "accession": "0001410578-25-000943",
+        "url": "https://www.sec.gov/Archives/edgar/data/1913510/000141057825000943/",
+        "reports": ["R2.htm"]
+      }
+    ],
+    "unit_note": "Values are VND million, matching the statement tables."
+  }
+}
