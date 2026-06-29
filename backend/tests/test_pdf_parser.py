@@ -398,6 +398,32 @@ def test_label_first_rows_repair_embedded_code_from_ocr_tail():
     assert row["label"] == "Gia von hang ban va dich vu cung cap"
 
 
+def test_statement_rows_repair_split_amount_groups_without_moving_them_to_note():
+    parser = PDFParser()
+    line = "02 Khau hao TSCD 2.116.245.292 358 2.095.159.644.941"
+
+    row = parser._parse_statement_table_row(line, 12, ["2025", "2024"], "cash_flow")
+
+    assert row is not None
+    assert row["code"] == "02"
+    assert row["note"] is None
+    assert row["values"]["2025"] == 2116245292358.0
+    assert row["values"]["2024"] == 2095159644941.0
+
+
+def test_statement_rows_do_not_extract_formula_numbers_as_notes():
+    parser = PDFParser()
+    line = "50 Luu chuyen tien thuan trong ky (50 = 20 + 30 + 40) 1.312.623.193.814 1.044.198.899.933"
+
+    row = parser._parse_statement_table_row(line, 14, ["2025", "2024"], "cash_flow")
+
+    assert row is not None
+    assert row["code"] == "50"
+    assert row["note"] is None
+    assert "40" not in row["label"]
+    assert row["values"]["2025"] == 1312623193814.0
+
+
 def test_statement_rows_keep_single_period_receivable_loan_line():
     parser = PDFParser()
     line = "135 3. Phai thu ve cho vay ngan han 36.3 1.914.106"

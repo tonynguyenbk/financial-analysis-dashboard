@@ -36,6 +36,10 @@ WRITTEN_EN_DATE_PATTERN = re.compile(
 NUMBER_PATTERN = re.compile(
     r"\(?-?\d{1,3}(?:[,.]\d{3})+(?:[,.]\d+)?\)?|\(?-?\d+(?:[,.]\d+)?\)?"
 )
+STATEMENT_NOTE_PATTERN = re.compile(
+    r"(?<![\w.])(?:[IVXLCDM]{1,5}\.?\d{1,2}[A-Za-z]?|[A-Z]{1,4}\d{1,2}|\d{1,2}(?:\.\d{1,2})?)(?![\w.])",
+    re.IGNORECASE,
+)
 STATEMENT_ROW_PATTERN = re.compile(r"^\s*\|?\s*(\d{2,3})\s*(?:[|.)]\s*)?(.*)$")
 TOC_LINE_PATTERN = re.compile(r"^(.+?)\s+(\d{1,3})(?:\s*[-–—]\s*(\d{1,3}))?\D*$")
 DEFAULT_OCR_MAX_PAGES = 0
@@ -1302,6 +1306,7 @@ class PDFParser(FinancialStatementParser):
         statement_key: str,
         raw_line: str,
     ) -> dict[str, Any] | None:
+        body = self._repair_split_number_groups(body)
         value_matches = self._material_number_matches(body)
         if not value_matches:
             return None
@@ -1331,6 +1336,7 @@ class PDFParser(FinancialStatementParser):
         periods: list[str],
         statement_key: str,
     ) -> dict[str, Any] | None:
+        line = self._repair_split_number_groups(line)
         value_matches = self._material_number_matches(line)
         if not value_matches:
             return None
@@ -1354,7 +1360,7 @@ class PDFParser(FinancialStatementParser):
         else:
             label = self._clean_statement_label(match.group("label"), statement_key)
             code = match.group("code")
-            note = match.group("note")
+            note = self._normalize_statement_note(match.group("note"))
         label, code, note = self._repair_embedded_statement_code(label, code, note)
         if not label or self._statement_label_is_noise(label):
             return None
@@ -1431,26 +1437,85 @@ class PDFParser(FinancialStatementParser):
         return matches
 
     def _extract_statement_note(self, text: str) -> tuple[str | None, str]:
-        small_number_matches: list[tuple[int, int, str]] = []
-        for match in NUMBER_PATTERN.finditer(text):
+        text_without_formulas = self._remove_formula_spans(text)
+        note_matches: list[tuple[int, int, str]] = []
+        for match in STATEMENT_NOTE_PATTERN.finditer(text_without_formulas):
             token = match.group(0)
-            value = coerce_number(token)
-            if value is None or abs(value) >= 1000:
+            normalized_note = self._normalize_statement_note(token)
+            if normalized_note is None:
                 continue
-            small_number_matches.append((match.start(), match.end(), token))
+            note_matches.append((match.start(), match.end(), normalized_note))
 
-        if not small_number_matches:
-            return None, text
+        if not note_matches:
+            return None, text_without_formulas
 
-        start, end, token = small_number_matches[-1]
-        is_decimal_note = "." in token or "," in token
-        is_trailing_note = start >= max(0, int(len(text) * 0.55))
-        has_item_number = len(small_number_matches) >= 2
-        if not (is_decimal_note or is_trailing_note or has_item_number):
-            return None, text
+        start, end, note = note_matches[-1]
+        is_structured_note = bool(re.search(r"[A-Za-z.]", note))
+        is_trailing_note = start >= max(0, int(len(text_without_formulas) * 0.55))
+        has_item_number = len(note_matches) >= 2
+        if not (is_structured_note or is_trailing_note or has_item_number):
+            return None, text_without_formulas
 
-        note = token.strip(" .|")
-        return note, self._remove_spans(text, [(start, end)])
+        return note, self._remove_spans(text_without_formulas, [(start, end)])
+
+    def _normalize_statement_note(self, token: str | None) -> str | None:
+        note = str(token or "").strip(" .|()")
+        if not note:
+            return None
+
+        if re.fullmatch(r"\d+", note):
+            value = int(note)
+            if not 0 < value <= 99:
+                return None
+            return str(value)
+
+        if re.fullmatch(r"\d{1,2}[,.]\d{1,2}", note):
+            return note.replace(",", ".")
+
+        if re.fullmatch(r"[IVXLCDM]{1,5}\.?\d{1,2}[A-Za-z]?", note, flags=re.IGNORECASE):
+            return note.upper()
+
+        if re.fullmatch(r"[A-Z]{1,4}\d{1,2}", note, flags=re.IGNORECASE):
+            return note.upper()
+
+        return None
+
+    def _remove_formula_spans(self, text: str) -> str:
+        cleaned = re.sub(r"\([^)]*=\s*[^)]*\)", " ", text)
+        return self._clean_statement_line(cleaned)
+
+    def _repair_split_number_groups(self, text: str) -> str:
+        tokens = str(text or "").split()
+        if len(tokens) < 2:
+            return str(text or "")
+
+        repaired: list[str] = []
+        index = 0
+        while index < len(tokens):
+            merged_token = tokens[index]
+            index += 1
+            while index < len(tokens) and self._can_merge_split_thousand_group(merged_token, tokens[index]):
+                merged_token = self._merge_split_thousand_group(merged_token, tokens[index])
+                index += 1
+            repaired.append(merged_token)
+
+        return " ".join(repaired)
+
+    def _can_merge_split_thousand_group(self, token: str, next_token: str) -> bool:
+        if not re.fullmatch(r"\d{3}\)?", next_token):
+            return False
+
+        bare_token = token.strip("()")
+        if not re.fullmatch(r"-?\d{1,3}(?:[,.]\d{3})+", bare_token):
+            return False
+
+        return True
+
+    def _merge_split_thousand_group(self, token: str, next_token: str) -> str:
+        closing = ")" if token.startswith("(") or next_token.endswith(")") else ""
+        cleaned_token = token.rstrip(")")
+        cleaned_next = next_token.rstrip(")")
+        return f"{cleaned_token}.{cleaned_next}{closing}"
 
     def _remove_spans(self, text: str, spans: list[tuple[int, int]]) -> str:
         if not spans:
@@ -1710,7 +1775,7 @@ class PDFParser(FinancialStatementParser):
 
         repaired_label = self._clean_statement_label(match.group("label"))
         repaired_code = match.group("code")
-        repaired_note = note or match.group("note")
+        repaired_note = self._normalize_statement_note(note or match.group("note"))
         return repaired_label, repaired_code, repaired_note
 
     def _looks_like_statement_label_hint(self, line: str) -> bool:
