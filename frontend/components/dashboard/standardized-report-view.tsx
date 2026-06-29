@@ -56,10 +56,10 @@ const sectionFields: Record<SectionKey, string[]> = {
 
 const hiddenMetadataKeys = new Set(["extracted_pages", "report_navigation", "statement_tables", "notes"]);
 const defaultStatementColumnWidths: Record<string, number> = {
-  label: 520,
-  code: 96,
-  note: 120,
-  value: 220
+  label: 390,
+  code: 64,
+  note: 86,
+  value: 180
 };
 
 export function StandardizedReportView({ statement, language, onStatementChange }: StandardizedReportViewProps) {
@@ -111,6 +111,8 @@ export function StandardizedReportView({ statement, language, onStatementChange 
             tables={statementTables}
             language={language}
             locale={locale}
+            currency={statement.currency}
+            companyName={statement.company.name}
             editedCells={editedCells}
             onCellChange={handleStatementTableCellChange}
           />
@@ -182,12 +184,16 @@ function MainStatementTables({
   tables,
   language,
   locale,
+  currency,
+  companyName,
   editedCells,
   onCellChange
 }: {
   tables: StatementTable[];
   language: Language;
   locale: string;
+  currency: string;
+  companyName: string;
   editedCells: Set<string>;
   onCellChange: (change: EditableCellChange) => void;
 }) {
@@ -202,12 +208,7 @@ function MainStatementTables({
   }
 
   return (
-    <div className="grid gap-4">
-      <section className="rounded-lg border border-line bg-surface p-4 shadow-soft">
-        <h3 className="text-base font-semibold text-ink">{labels.title}</h3>
-        <p className="mt-2 text-sm leading-6 text-ink/62">{labels.body}</p>
-      </section>
-
+    <div className="grid gap-8">
       {tables.map((table, tableIndex) => {
         const valueColumns = table.columns.filter(
           (column) => !["code", "label", "note"].includes(column.key)
@@ -230,103 +231,126 @@ function MainStatementTables({
           getStatementColumnWidth(table.key, column.key, columnWidths)
         );
         const tableWidth = resolvedWidths.reduce((total, width) => total + width, 0);
+        const pageWidth = Math.max(tableWidth + 96, 860);
 
         return (
-          <section key={table.key} className="rounded-lg border border-line bg-surface p-4 shadow-soft">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className="text-base font-semibold text-ink">{table.title}</h3>
-                {table.pages?.length ? (
-                  <p className="mt-1 text-xs font-semibold text-ink/52">
-                    {labels.pages} {table.pages.join(", ")}
-                  </p>
-                ) : null}
-              </div>
-              <span className="rounded-md border border-line bg-paper px-3 py-1 text-sm font-semibold text-ink/68">
-                {table.rows.length} {labels.rows}
-              </span>
-            </div>
-
-            <div className="mt-4 overflow-x-auto">
-              <table
-                className="table-fixed border-separate border-spacing-0 text-left text-sm"
-                style={{ width: `${tableWidth}px`, minWidth: "100%" }}
+          <section key={table.key} className="rounded-lg border border-line bg-surface p-3 shadow-soft">
+            <div className="overflow-x-auto">
+              <div
+                className="mx-auto bg-white px-12 py-10 text-neutral-950 shadow-[0_18px_60px_rgba(0,0,0,0.18)]"
+                style={{
+                  width: `${pageWidth}px`,
+                  fontFamily: '"Times New Roman", Times, serif'
+                }}
               >
-                <colgroup>
-                  {tableColumns.map((column, columnIndex) => (
-                    <col key={column.key} style={{ width: `${resolvedWidths[columnIndex]}px` }} />
-                  ))}
-                </colgroup>
-                <thead>
-                  <tr className="text-ink/56">
+                <StatementPdfHeader
+                  table={table}
+                  companyName={companyName}
+                  valueColumns={valueColumns}
+                  language={language}
+                />
+
+                <table
+                  className="table-fixed border-separate border-spacing-0 text-left text-[14px] leading-[1.16] text-neutral-950"
+                  style={{ width: `${tableWidth}px` }}
+                >
+                  <colgroup>
                     {tableColumns.map((column, columnIndex) => (
-                      <ResizableStatementHeader
-                        key={column.key}
-                        label={column.label}
-                        align={column.align}
-                        width={resolvedWidths[columnIndex]}
-                        minWidth={column.minWidth}
-                        onResize={(width) => handleColumnResize(table.key, column.key, width)}
-                      />
+                      <col key={column.key} style={{ width: `${resolvedWidths[columnIndex]}px` }} />
                     ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {table.rows.map((row, rowIndex) => (
-                    <tr key={`${table.key}-${row.page ?? "p"}-${row.code}-${row.label}-${rowIndex}`}>
-                      <td
-                        className="border-b border-line py-3 pr-3 font-medium text-ink"
-                        style={{ paddingLeft: `${12 + Math.max(0, (row.level ?? 1) - 1) * 14}px` }}
-                        title={row.raw_label && row.raw_label !== row.label ? row.raw_label : undefined}
-                      >
-                        {row.label}
-                      </td>
-                      <td className="border-b border-line px-3 py-3 text-center font-semibold text-ink/68">{row.code}</td>
-                      <td className="border-b border-line px-3 py-3 text-center text-ink/62">
-                        <EditableStatementCell
-                          align="center"
-                          value={row.note ?? null}
-                          displayValue={row.note ?? "-"}
-                          edited={editedCells.has(statementCellKey(table.key, rowIndex, "note"))}
-                          onCommit={(value) =>
-                            onCellChange({
-                              tableIndex,
-                              tableKey: table.key,
-                              rowIndex,
-                              columnKey: "note",
-                              kind: "note",
-                              value
-                            })
-                          }
+                  </colgroup>
+                  <thead>
+                    <tr className="text-neutral-950">
+                      {tableColumns.map((column, columnIndex) => (
+                        <ResizableStatementHeader
+                          key={column.key}
+                          label={column.label}
+                          align={column.align}
+                          width={resolvedWidths[columnIndex]}
+                          minWidth={column.minWidth}
+                          currency={valueColumns.some((valueColumn) => valueColumn.key === column.key) ? currency : null}
+                          onResize={(width) => handleColumnResize(table.key, column.key, width)}
                         />
-                      </td>
-                      {valueColumns.map((column) => (
-                        <td key={`${row.code}-${column.key}`} className="border-b border-line px-3 py-3 text-right font-mono text-ink/78">
-                          <EditableStatementCell
-                            align="right"
-                            value={row.values[column.key] ?? null}
-                            displayValue={formatStatementNumber(row.values[column.key], locale)}
-                            edited={editedCells.has(statementCellKey(table.key, rowIndex, `value:${column.key}`))}
-                            onCommit={(value) => {
-                              const parsedValue = parseEditableNumber(value);
-                              if (parsedValue !== undefined) {
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {table.rows.map((row, rowIndex) => {
+                      const rowLevel = getStatementRowLevel(row);
+                      const emphasized = rowLevel <= 2 || isStatementTotalRow(table.key, row.code);
+                      const sectionLike = rowLevel <= 1;
+                      const totalLike = isStatementTotalRow(table.key, row.code);
+                      const topRuleClass = totalLike ? "border-t border-neutral-950" : "";
+                      const labelIndent = Math.max(0, rowLevel - 1) * 14;
+
+                      return (
+                        <tr
+                          key={`${table.key}-${row.page ?? "p"}-${row.code}-${row.label}-${rowIndex}`}
+                        >
+                          <td
+                            className={`py-[3px] pr-3 align-top ${topRuleClass} ${
+                              emphasized ? "font-bold" : "font-normal"
+                            } ${sectionLike ? "pt-4 uppercase" : ""}`}
+                            style={{ paddingLeft: `${labelIndent}px` }}
+                            title={row.raw_label && row.raw_label !== row.label ? row.raw_label : undefined}
+                          >
+                            {row.label}
+                          </td>
+                          <td className={`px-2 py-[3px] text-center align-top ${topRuleClass} ${emphasized ? "font-bold" : "font-normal"}`}>
+                            {row.code}
+                          </td>
+                          <td className={`px-2 py-[2px] text-center align-top ${topRuleClass}`}>
+                            <EditableStatementCell
+                              align="center"
+                              value={row.note ?? null}
+                              displayValue={row.note ?? "-"}
+                              edited={editedCells.has(statementCellKey(table.key, rowIndex, "note"))}
+                              onCommit={(value) =>
                                 onCellChange({
                                   tableIndex,
                                   tableKey: table.key,
                                   rowIndex,
-                                  columnKey: column.key,
-                                  kind: "value",
-                                  value: parsedValue
-                                });
+                                  columnKey: "note",
+                                  kind: "note",
+                                  value
+                                })
                               }
-                            }}
-                          />
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                            />
+                          </td>
+                          {valueColumns.map((column) => (
+                            <td
+                              key={`${row.code}-${column.key}`}
+                              className={`px-2 py-[2px] text-right align-top tabular-nums ${
+                                emphasized ? "font-bold" : "font-normal"
+                              } ${topRuleClass}`}
+                            >
+                              <EditableStatementCell
+                                align="right"
+                                value={row.values[column.key] ?? null}
+                                displayValue={formatStatementNumber(row.values[column.key], locale)}
+                                edited={editedCells.has(statementCellKey(table.key, rowIndex, `value:${column.key}`))}
+                                onCommit={(value) => {
+                                  const parsedValue = parseEditableNumber(value);
+                                  if (parsedValue !== undefined) {
+                                    onCellChange({
+                                      tableIndex,
+                                      tableKey: table.key,
+                                      rowIndex,
+                                      columnKey: column.key,
+                                      kind: "value",
+                                      value: parsedValue
+                                    });
+                                  }
+                                }}
+                              />
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </section>
         );
@@ -335,17 +359,54 @@ function MainStatementTables({
   );
 }
 
+function StatementPdfHeader({
+  table,
+  companyName,
+  valueColumns,
+  language
+}: {
+  table: StatementTable;
+  companyName: string;
+  valueColumns: StatementTable["columns"];
+  language: Language;
+}) {
+  const labels = statementPdfHeaderLabels[language];
+  const formCode = getStatementFormCode(table.key);
+  const periodCaption = getStatementPeriodCaption(table, valueColumns, language);
+  const cashFlowMethod = getCashFlowMethodLabel(table, language);
+
+  return (
+    <header className="mb-7 grid grid-cols-[1fr_auto] gap-8 text-[16px] leading-[1.08] text-neutral-950">
+      <div className="font-bold">
+        <p>{companyName}</p>
+        <p>
+          {table.title}
+          {periodCaption ? ` ${periodCaption}` : ""}
+        </p>
+        {cashFlowMethod ? <p>{cashFlowMethod}</p> : null}
+      </div>
+      <div className="min-w-[250px] text-center text-[14px] leading-[1.14]">
+        <p className="font-bold">{formCode}</p>
+        <p className="italic">{labels.circularLine1}</p>
+        <p className="italic">{labels.circularLine2}</p>
+      </div>
+    </header>
+  );
+}
+
 function ResizableStatementHeader({
   label,
   align,
   width,
   minWidth,
+  currency,
   onResize
 }: {
   label: string;
   align: "left" | "center" | "right";
   width: number;
   minWidth: number;
+  currency?: string | null;
   onResize: (width: number) => void;
 }) {
   function handlePointerDown(event: PointerEvent<HTMLButtonElement>) {
@@ -377,16 +438,17 @@ function ResizableStatementHeader({
 
   return (
     <th
-      className={`relative border-b border-line px-3 py-3 font-semibold ${
+      className={`relative border-b border-neutral-950 px-2 pb-2 pt-1 align-bottom font-bold leading-[1.05] ${
         align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left"
       }`}
       style={{ width: `${width}px`, minWidth: `${minWidth}px` }}
       scope="col"
     >
-      <span className="block truncate pr-2">{label}</span>
+      <span className="block whitespace-normal pr-2">{label}</span>
+      {currency ? <span className="block pr-2">{currency}</span> : null}
       <button
         type="button"
-        className="absolute right-0 top-2 h-[calc(100%-16px)] w-3 cursor-col-resize rounded-sm border-r border-line/80 transition hover:border-gold hover:bg-gold/20 active:border-gold"
+        className="absolute right-0 top-1 h-[calc(100%-8px)] w-3 cursor-col-resize border-r border-transparent transition hover:border-amber-500 hover:bg-amber-100/70 active:border-amber-600"
         aria-label={`Resize ${label}`}
         onPointerDown={handlePointerDown}
       />
@@ -412,12 +474,12 @@ function EditableStatementCell({
       key={`${displayValue}-${edited ? "edited" : "clean"}`}
       type="text"
       defaultValue={displayValue}
-      className={`h-9 w-full min-w-0 rounded-md border bg-transparent px-2 text-sm text-ink outline-none transition focus:border-marine focus:bg-paper focus:ring-2 focus:ring-marine/20 ${
-        align === "right" ? "text-right font-mono" : "text-center"
+      className={`h-[22px] w-full min-w-0 border bg-transparent px-1 text-[14px] leading-none text-neutral-950 outline-none transition focus:border-emerald-700 focus:bg-emerald-50 focus:ring-1 focus:ring-emerald-700/20 ${
+        align === "right" ? "text-right tabular-nums" : "text-center"
       } ${
         edited
-          ? "border-gold bg-gold/10 ring-1 ring-gold/40"
-          : "border-transparent hover:border-line"
+          ? "border-amber-500 bg-amber-100/70 ring-1 ring-amber-500/40"
+          : "border-transparent hover:border-neutral-300"
       }`}
       onBlur={(event) => {
         const nextValue = event.currentTarget.value;
@@ -455,6 +517,73 @@ function StatementNotes({ noteText, language }: { noteText: string | null; langu
 
 function getColumnLabel(table: StatementTable, key: string, fallback: string): string {
   return table.columns.find((column) => column.key === key)?.label ?? fallback;
+}
+
+function getStatementFormCode(tableKey: string): string {
+  const formCodes: Record<string, string> = {
+    financial_position: "Mẫu B 01 - DN/HN",
+    income_statement: "Mẫu B 02 - DN/HN",
+    cash_flow: "Mẫu B 03 - DN/HN"
+  };
+  return formCodes[tableKey] ?? "Mẫu báo cáo";
+}
+
+function getStatementPeriodCaption(
+  table: StatementTable,
+  valueColumns: StatementTable["columns"],
+  language: Language
+): string {
+  const year = getFirstStatementYear(valueColumns);
+  if (!year) {
+    return "";
+  }
+
+  if (language === "en") {
+    return table.key === "financial_position"
+      ? `as at 31 December ${year}`
+      : `for the year ended 31 December ${year}`;
+  }
+
+  return table.key === "financial_position"
+    ? `tại ngày 31 tháng 12 năm ${year}`
+    : `cho năm kết thúc ngày 31 tháng 12 năm ${year}`;
+}
+
+function getFirstStatementYear(valueColumns: StatementTable["columns"]): string | null {
+  for (const column of valueColumns) {
+    const match = `${column.label} ${column.key}`.match(/\b(19|20)\d{2}\b/);
+    if (match) {
+      return match[0];
+    }
+  }
+  return null;
+}
+
+function getCashFlowMethodLabel(table: StatementTable, language: Language): string | null {
+  if (table.key !== "cash_flow") {
+    return null;
+  }
+  const isDirect = table.template_key === "cash_flow_direct";
+  if (language === "en") {
+    return isDirect ? "(Direct method)" : "(Indirect method)";
+  }
+  return isDirect ? "(Phương pháp trực tiếp)" : "(Phương pháp gián tiếp)";
+}
+
+function getStatementRowLevel(row: StatementTable["rows"][number]): number {
+  if (typeof row.level === "number" && Number.isFinite(row.level)) {
+    return Math.max(1, row.level);
+  }
+  return 2;
+}
+
+function isStatementTotalRow(tableKey: string, code: string): boolean {
+  const totalCodes: Record<string, Set<string>> = {
+    financial_position: new Set(["100", "200", "270", "300", "400", "440"]),
+    income_statement: new Set(["10", "20", "30", "40", "50", "60", "62", "70", "71"]),
+    cash_flow: new Set(["08", "20", "30", "40", "50", "60", "70"])
+  };
+  return totalCodes[tableKey]?.has(code) ?? false;
 }
 
 function ReportNavigation({
@@ -997,12 +1126,14 @@ function formatStatementNumber(value: number | null | undefined, locale: string)
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "-";
   }
-  const digits = Number.isInteger(value) ? 0 : Math.min(value.toString().split(".")[1]?.length ?? 0, 20);
-  return Intl.NumberFormat(locale, {
+  const absoluteValue = Math.abs(value);
+  const digits = Number.isInteger(absoluteValue) ? 0 : Math.min(absoluteValue.toString().split(".")[1]?.length ?? 0, 20);
+  const formatted = Intl.NumberFormat(locale, {
     maximumFractionDigits: digits,
     minimumFractionDigits: digits,
     useGrouping: true
-  }).format(value);
+  }).format(absoluteValue);
+  return value < 0 ? `(${formatted})` : formatted;
 }
 
 const statementTableLabels = {
@@ -1023,6 +1154,17 @@ const statementTableLabels = {
     code: "Mã số",
     item: "Chỉ tiêu",
     note: "Thuyết minh"
+  }
+} as const;
+
+const statementPdfHeaderLabels = {
+  en: {
+    circularLine1: "(Issued under Circular 202/2014/TT-BTC",
+    circularLine2: "dated 22 December 2014 by the Ministry of Finance)"
+  },
+  vi: {
+    circularLine1: "(Ban hành theo Thông tư số 202/2014/TT-BTC",
+    circularLine2: "ngày 22 tháng 12 năm 2014 của Bộ Tài chính)"
   }
 } as const;
 

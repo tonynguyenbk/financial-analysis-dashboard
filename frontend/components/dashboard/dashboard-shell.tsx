@@ -263,23 +263,26 @@ function useEstimatedProgress(active: boolean, expectedDurationMs: number) {
 
   useEffect(() => {
     if (!active) {
-      setProgress(0);
       return;
     }
 
     const startedAt = Date.now();
-    setProgress(6);
-
-    const interval = window.setInterval(() => {
+    const updateProgress = () => {
       const elapsed = Date.now() - startedAt;
       const curvedProgress = 100 * (1 - Math.exp(-elapsed / (expectedDurationMs / 2.6)));
       setProgress(Math.min(96, Math.max(6, Math.round(curvedProgress))));
-    }, 500);
+    };
 
-    return () => window.clearInterval(interval);
+    const initialTick = window.setTimeout(updateProgress, 0);
+    const interval = window.setInterval(updateProgress, 500);
+
+    return () => {
+      window.clearTimeout(initialTick);
+      window.clearInterval(interval);
+    };
   }, [active, expectedDurationMs]);
 
-  return progress;
+  return active ? progress : 0;
 }
 
 function WorkflowStrip({
