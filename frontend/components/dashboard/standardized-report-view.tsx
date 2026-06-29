@@ -276,7 +276,7 @@ function MainStatementTables({
                   </thead>
                   <tbody>
                     {table.rows.map((row, rowIndex) => {
-                      const rowLevel = getStatementRowLevel(row);
+                      const rowLevel = getStatementDisplayLevel(table.key, row);
                       const emphasized = rowLevel <= 2 || isStatementTotalRow(table.key, row.code);
                       const sectionLike = rowLevel <= 1;
                       const totalLike = isStatementTotalRow(table.key, row.code);
@@ -576,6 +576,13 @@ function getStatementRowLevel(row: StatementTable["rows"][number]): number {
     return Math.max(1, row.level);
   }
   return 2;
+}
+
+function getStatementDisplayLevel(tableKey: string, row: StatementTable["rows"][number]): number {
+  if (tableKey === "income_statement") {
+    return isStatementTotalRow(tableKey, row.code) ? 2 : 3;
+  }
+  return getStatementRowLevel(row);
 }
 
 function isStatementTotalRow(tableKey: string, code: string): boolean {

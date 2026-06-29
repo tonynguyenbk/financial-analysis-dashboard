@@ -12,6 +12,7 @@ from app.parsers.normalization import normalize_label
 
 DEFAULT_MAPPING_FILE = "PL1_TT201_2014_BTC.xlsx"
 CODE_PATTERN = re.compile(r"^\d{2,3}[a-zA-Z]?$")
+INCOME_STATEMENT_TOTAL_CODES = {"10", "20", "30", "40", "50", "60", "62", "70", "71"}
 
 
 @dataclass(frozen=True)
@@ -224,7 +225,7 @@ def _infer_level(raw_label: str, code: str, statement_key: str) -> int:
         return 1 if code.endswith("00") else 2 if code.endswith("0") else 3
 
     if statement_key == "income_statement":
-        return 1
+        return 2 if code in INCOME_STATEMENT_TOTAL_CODES else 3
 
     if statement_key in {"cash_flow_direct", "cash_flow_indirect", "cash_flow"}:
         if re.match(r"^[-–—]", label):
