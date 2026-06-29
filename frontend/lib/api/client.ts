@@ -19,6 +19,10 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
 }
 
 type ParseProgressHandler = (snapshot: ParseJobSnapshot) => void;
+const PARSE_POLL_INTERVAL_MS = 900;
+const PARSE_MAX_TOTAL_MS = 30 * 60 * 1000;
+const PARSE_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+const PARSE_TRANSIENT_ERROR_TIMEOUT_MS = 90 * 1000;
 
 export async function parseStatementFile(
   file: File,
@@ -49,26 +53,51 @@ async function waitForParseJob(
   jobId: string,
   onProgress?: ParseProgressHandler
 ): Promise<FinancialStatement> {
-  const deadline = Date.now() + 10 * 60 * 1000;
+  const startedAt = Date.now();
+  let lastProgressAt = startedAt;
+  let lastTransientErrorAt: number | null = null;
+  let lastProgress = -1;
 
-  while (Date.now() < deadline) {
-    await sleep(900);
-    const snapshot = await getParseJob(jobId);
+  while (Date.now() - startedAt < PARSE_MAX_TOTAL_MS) {
+    await sleep(PARSE_POLL_INTERVAL_MS);
+    let snapshot: ParseJobSnapshot;
+
+    try {
+      snapshot = await getParseJob(jobId);
+      lastTransientErrorAt = null;
+    } catch (error) {
+      lastTransientErrorAt ??= Date.now();
+      if (Date.now() - lastTransientErrorAt >= PARSE_TRANSIENT_ERROR_TIMEOUT_MS) {
+        throw error;
+      }
+      continue;
+    }
+
     onProgress?.(snapshot);
 
-    if (snapshot.status === "completed") {
-      if (!snapshot.statement) {
-        throw new Error("Parse job completed without a standardized statement.");
-      }
+    if (snapshot.progress > lastProgress) {
+      lastProgress = snapshot.progress;
+      lastProgressAt = Date.now();
+    }
+
+    if (snapshot.statement) {
       return snapshot.statement;
+    }
+
+    if (snapshot.status === "completed") {
+      throw new Error("Parse job completed without a standardized statement.");
     }
 
     if (snapshot.status === "failed") {
       throw new Error(snapshot.error ?? snapshot.message);
     }
+
+    if (Date.now() - lastProgressAt >= PARSE_IDLE_TIMEOUT_MS) {
+      throw new Error("Parse job stopped making progress.");
+    }
   }
 
-  throw new Error("Parse job timed out.");
+  throw new Error("Parse job exceeded the maximum processing window.");
 }
 
 export async function calculateMetrics(

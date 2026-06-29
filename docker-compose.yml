@@ -4,10 +4,12 @@ services:
       context: ./backend
     environment:
       PDF_OCR_MAX_PAGES: "0"
+      PDF_OCR_SCALE: "1.8"
       PDF_OCR_LANGUAGES: vie
-      PDF_OCR_WORKERS: "2"
+      PDF_OCR_WORKERS: "1"
       PDF_TOC_OCR_SCALE: "1.6"
       OMP_THREAD_LIMIT: "1"
+    restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:

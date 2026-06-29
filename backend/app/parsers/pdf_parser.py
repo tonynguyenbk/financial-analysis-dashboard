@@ -43,9 +43,9 @@ STATEMENT_NOTE_PATTERN = re.compile(
 STATEMENT_ROW_PATTERN = re.compile(r"^\s*\|?\s*(\d{2,3})\s*(?:[|.)]\s*)?(.*)$")
 TOC_LINE_PATTERN = re.compile(r"^(.+?)\s+(\d{1,3})(?:\s*[-–—]\s*(\d{1,3}))?\D*$")
 DEFAULT_OCR_MAX_PAGES = 0
-DEFAULT_OCR_SCALE = 2.4
+DEFAULT_OCR_SCALE = 1.8
 DEFAULT_TOC_OCR_SCALE = 1.6
-DEFAULT_OCR_WORKERS = 2
+DEFAULT_OCR_WORKERS = 1
 DEFAULT_OCR_LANGUAGES = "vie"
 DEFAULT_OCR_CONFIG = "--oem 1 --psm 6 -c preserve_interword_spaces=1"
 DEFAULT_TOC_SCAN_PAGES = 12
@@ -338,7 +338,7 @@ class PDFParser(FinancialStatementParser):
 
         target_indexes = self._target_statement_page_indexes(page_texts, page_count)
         if not target_indexes:
-            fallback_limit = min(page_count, max(toc_limit + 18, 24))
+            fallback_limit = min(page_count, max(toc_limit + 10, 16))
             target_indexes = list(range(fallback_limit))
 
         self._ocr_page_indexes(
@@ -511,6 +511,16 @@ class PDFParser(FinancialStatementParser):
             raise ValueError(
                 "Tesseract OCR is not installed. Run the Docker backend image or install Tesseract locally."
             ) from exc
+        finally:
+            close_image = getattr(image, "close", None)
+            if callable(close_image):
+                close_image()
+            close_bitmap = getattr(bitmap, "close", None)
+            if callable(close_bitmap):
+                close_bitmap()
+            close_page = getattr(page, "close", None)
+            if callable(close_page):
+                close_page()
         return self._clean_ocr_text(text or "")
 
     def _target_statement_page_indexes(self, pages: list[str], page_count: int) -> list[int]:
