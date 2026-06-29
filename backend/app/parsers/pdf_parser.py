@@ -36,7 +36,7 @@ DEFAULT_OCR_LANGUAGES = "vie"
 DEFAULT_OCR_CONFIG = "--oem 1 --psm 6 -c preserve_interword_spaces=1"
 DEFAULT_TOC_SCAN_PAGES = 12
 PREVIEW_PROGRESS = 65
-NOTE_MARKERS = (
+DISCLOSURE_NAVIGATION_MARKERS = (
     "notes to the financial statements",
     "thuyet minh bao cao tai chinh",
     "accounting policies",
@@ -49,7 +49,6 @@ NAVIGATION_HEADINGS = (
     "bang can doi ke toan hop nhat",
     "bao cao ket qua hoat dong kinh doanh hop nhat",
     "bao cao luu chuyen tien te hop nhat",
-    "thuyet minh bao cao tai chinh hop nhat",
     "phu luc",
 )
 MAIN_STATEMENT_SPECS = (
@@ -146,11 +145,10 @@ class PDFParser(FinancialStatementParser):
             "text_records": len(text_records),
             "statement_table_records": len(statement_table_records),
             "ocr_used": ocr_used,
-            "extracted_page_count": len(extracted["pages"]),
+            "extracted_page_count": len([page for page in extracted["pages"] if page.strip()]),
             "extracted_pages": self._build_extracted_pages(extracted["pages"]),
             "statement_tables": statement_tables,
             "report_navigation": self._build_report_navigation(extracted["pages"]),
-            "notes": self._extract_notes_excerpt(extracted["text"]),
         }
 
         self._report_progress(progress_callback, 96, "normalizing", "Building standardized financial report.")
@@ -329,33 +327,9 @@ class PDFParser(FinancialStatementParser):
                 progress_callback,
                 PREVIEW_PROGRESS,
                 "preview_ready",
-                "Primary financial statements are ready for review. Continuing background OCR.",
+                "Primary financial statements are ready for review.",
                 preview_statement,
             )
-
-        remaining_indexes = [
-            page_index
-            for page_index in range(page_count)
-            if self._ocr_scale_is_stale(ocr_scales.get(page_index), scale)
-        ]
-        self._ocr_page_indexes(
-            content=content,
-            page_indexes=remaining_indexes,
-            page_count=page_count,
-            page_texts=page_texts,
-            ocr_scales=ocr_scales,
-            scale=scale,
-            languages=languages,
-            ocr_config=ocr_config,
-            workers=workers,
-            progress_callback=progress_callback,
-            progress_start=PREVIEW_PROGRESS,
-            progress_span=20,
-            stage="ocr",
-            message_builder=lambda completed, total, page_index: (
-                f"OCR remaining page {completed}/{total} (PDF page {page_index + 1}/{page_count})."
-            ),
-        )
 
         return page_texts
 
@@ -1696,6 +1670,9 @@ class PDFParser(FinancialStatementParser):
         entries.sort(key=lambda item: (int(item["page"]), int(item.get("level") or 1), str(item.get("title") or "")))
         return self._deduplicate_navigation(entries)
 
+    def _is_disclosure_navigation_title(self, normalized_title: str) -> bool:
+        return any(marker in normalized_title for marker in DISCLOSURE_NAVIGATION_MARKERS)
+
     def _extract_toc_navigation_entries(self, pages: list[str]) -> list[dict[str, Any]]:
         entries: list[dict[str, Any]] = []
         for page_index, page_text in enumerate(pages[:10]):
@@ -1713,7 +1690,10 @@ class PDFParser(FinancialStatementParser):
                     continue
 
                 title = match.group(1).strip(" ._-–—")
-                if len(normalize_label(title)) < 6:
+                normalized_title = normalize_label(title)
+                if len(normalized_title) < 6:
+                    continue
+                if self._is_disclosure_navigation_title(normalized_title):
                     continue
 
                 entries.append(
@@ -1780,6 +1760,8 @@ class PDFParser(FinancialStatementParser):
                 line = self._clean_navigation_line(raw_line)
                 normalized = normalize_label(line)
                 if len(normalized) < 6:
+                    continue
+                if self._is_disclosure_navigation_title(normalized):
                     continue
 
                 if any(heading in normalized for heading in NAVIGATION_HEADINGS):
@@ -1936,16 +1918,6 @@ class PDFParser(FinancialStatementParser):
         if max_pages <= 0:
             return total_pages
         return min(total_pages, max_pages)
-
-    def _extract_notes_excerpt(self, text: str) -> str | None:
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        normalized_lines = [normalize_label(line) for line in lines]
-
-        for index, normalized in enumerate(normalized_lines):
-            if any(marker in normalized for marker in NOTE_MARKERS):
-                excerpt = " ".join(lines[index : index + 12])
-                return excerpt[:2000]
-        return None
 
     def _infer_company_name(self, file_name: str, metadata: dict[str, Any]) -> str:
         title = str(metadata.get("Title") or metadata.get("title") or "").strip()

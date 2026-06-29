@@ -11,7 +11,7 @@ from app.schemas.financial import FinancialStatement
 from app.schemas.jobs import ParseJobSnapshot
 
 
-PARSE_CACHE_VERSION = "financial-dashboard-parser-v4"
+PARSE_CACHE_VERSION = "financial-dashboard-parser-v5"
 
 
 class ParseJobStore:
