@@ -96,6 +96,10 @@ def load_statement_mapping(path: str | None = None) -> StatementMapping:
         level = _infer_level(raw_label, code, current_statement)
         statement_stack = stack_by_statement.setdefault(current_statement, {})
         parent_code = _find_parent_code(statement_stack, level)
+        suffixed_parent = _find_suffixed_code_parent(items, current_statement, code)
+        if suffixed_parent is not None:
+            parent_code = suffixed_parent.code
+            level = max(level, suffixed_parent.level + 1)
         statement_stack[level] = code
         for stale_level in [key for key in statement_stack if key > level]:
             statement_stack.pop(stale_level, None)
@@ -171,9 +175,29 @@ def _find_header_code_column(worksheet: Any, row_number: int) -> int | None:
 
 def _clean_code(value: Any) -> str | None:
     text = _clean_text(value)
-    if not CODE_PATTERN.fullmatch(text):
+    match = CODE_PATTERN.fullmatch(text)
+    if not match:
         return None
-    return text
+    code_match = re.fullmatch(r"(\d{2,3})([a-zA-Z]?)", text)
+    if code_match is None:
+        return text
+    return f"{code_match.group(1)}{code_match.group(2).lower()}"
+
+
+def _find_suffixed_code_parent(
+    items: list[StatementMappingItem],
+    statement_key: str,
+    code: str,
+) -> StatementMappingItem | None:
+    match = re.fullmatch(r"(\d{2,3})[a-zA-Z]", code)
+    if not match:
+        return None
+
+    base_code = match.group(1)
+    for item in reversed(items):
+        if item.statement_key == statement_key and item.code == base_code:
+            return item
+    return None
 
 
 def _clean_text(value: Any) -> str:

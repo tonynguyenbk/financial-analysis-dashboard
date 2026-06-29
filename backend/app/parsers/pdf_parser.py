@@ -40,7 +40,8 @@ STATEMENT_NOTE_PATTERN = re.compile(
     r"(?<![\w.])(?:[IVXLCDM]{1,5}\.?\d{1,2}[A-Za-z]?|[A-Z]{1,4}\d{1,2}|\d{1,2}(?:\.\d{1,2})?)(?![\w.])",
     re.IGNORECASE,
 )
-STATEMENT_ROW_PATTERN = re.compile(r"^\s*\|?\s*(\d{2,3})\s*(?:[|.)]\s*)?(.*)$")
+STATEMENT_CODE_TEXT_PATTERN = r"\d{2,3}[A-Za-z]?"
+STATEMENT_ROW_PATTERN = re.compile(rf"^\s*\|?\s*({STATEMENT_CODE_TEXT_PATTERN})\s*(?:[|.)]\s*)?(.*)$")
 TOC_LINE_PATTERN = re.compile(r"^(.+?)\s+(\d{1,3})(?:\s*[-–—]\s*(\d{1,3}))?\D*$")
 DEFAULT_OCR_MAX_PAGES = 0
 DEFAULT_OCR_SCALE = 1.8
@@ -1494,7 +1495,7 @@ class PDFParser(FinancialStatementParser):
             return None
 
         return {
-            "code": code,
+            "code": self._normalize_statement_code(code),
             "label": label,
             "note": note,
             "values": values,
@@ -1519,7 +1520,7 @@ class PDFParser(FinancialStatementParser):
         label_and_codes = self._remove_spans(line, [(start, end) for start, end, _ in selected_value_matches])
         label_and_codes = self._clean_statement_line(label_and_codes)
         match = re.match(
-            r"^(?P<label>.+?)\s+(?P<code>\d{2,3})(?:\s+(?P<note>\d+(?:\.\d+)?))?\s*$",
+            rf"^(?P<label>.+?)\s+(?P<code>{STATEMENT_CODE_TEXT_PATTERN})(?:\s+(?P<note>\d+(?:\.\d+)?))?\s*$",
             label_and_codes,
         )
         if not match:
@@ -1532,14 +1533,14 @@ class PDFParser(FinancialStatementParser):
                 return None
         else:
             label = self._clean_statement_label(match.group("label"), statement_key)
-            code = match.group("code")
+            code = self._normalize_statement_code(match.group("code"))
             note = self._normalize_statement_note(match.group("note"))
         label, code, note = self._repair_embedded_statement_code(label, code, note)
         if not label or self._statement_label_is_noise(label):
             return None
 
         return {
-            "code": code,
+            "code": self._normalize_statement_code(code),
             "label": label,
             "note": note,
             "values": values,
@@ -1876,12 +1877,16 @@ class PDFParser(FinancialStatementParser):
         statement_key: str,
         template_key: str | None = None,
     ) -> dict[str, Any]:
-        current_code = str(row.get("code") or "").strip()
+        current_code = self._normalize_statement_code(row.get("code"))
         current_note = str(row.get("note") or "").strip() if row.get("note") is not None else None
         current_label = str(row.get("label") or "")
 
         if self._find_mapping_item_by_code(statement_key, current_code, template_key) is not None:
-            return row
+            if current_code == row.get("code"):
+                return row
+            repaired = row.copy()
+            repaired["code"] = current_code
+            return repaired
 
         label_code = self._first_mapped_code_token(current_label, statement_key, template_key)
         note_code = self._first_mapped_code_token(current_note or "", statement_key, template_key)
@@ -1891,7 +1896,7 @@ class PDFParser(FinancialStatementParser):
             return row
 
         repaired = row.copy()
-        repaired["code"] = selected_code
+        repaired["code"] = self._normalize_statement_code(selected_code)
 
         if label_code is not None:
             repaired["label"] = self._remove_statement_code_token_from_label(current_label, selected_code)
@@ -1915,16 +1920,29 @@ class PDFParser(FinancialStatementParser):
 
     def _statement_code_tokens(self, text: str) -> list[str]:
         tokens: list[str] = []
-        for match in re.finditer(r"(?<![\d.,])(\d{2,3})(?![\d.,])", str(text or "")):
-            token = match.group(1)
+        for match in re.finditer(rf"(?<![\w.,])({STATEMENT_CODE_TEXT_PATTERN})(?![\w.,])", str(text or "")):
+            token = self._normalize_statement_code(match.group(1))
             if token not in tokens:
                 tokens.append(token)
         return tokens
 
     def _remove_statement_code_token_from_label(self, label: str, code: str) -> str:
-        cleaned = re.sub(rf"(?<![\d.,]){re.escape(code)}(?![\d.,])", " ", label, count=1)
+        cleaned = re.sub(
+            rf"(?<![\w.,]){re.escape(code)}(?![\w.,])",
+            " ",
+            label,
+            count=1,
+            flags=re.IGNORECASE,
+        )
         cleaned = self._clean_statement_label(cleaned)
         return cleaned or label
+
+    def _normalize_statement_code(self, code: Any) -> str:
+        text = str(code or "").strip()
+        match = re.fullmatch(rf"(\d{{2,3}})([A-Za-z]?)", text)
+        if not match:
+            return text
+        return f"{match.group(1)}{match.group(2).lower()}"
 
     def _repair_embedded_statement_code(
         self,
@@ -1932,23 +1950,20 @@ class PDFParser(FinancialStatementParser):
         code: str,
         note: str | None,
     ) -> tuple[str, str, str | None]:
-        try:
-            parsed_code = int(code)
-        except ValueError:
-            parsed_code = 0
+        parsed_code = self._statement_code_number(code) or 0
 
         if parsed_code <= 200:
             return label, code, note
 
         match = re.match(
-            r"^(?P<label>.+?)\s+(?P<code>\d{2,3})(?:\s+(?P<note>[A-Za-z0-9.]+))?$",
+            rf"^(?P<label>.+?)\s+(?P<code>{STATEMENT_CODE_TEXT_PATTERN})(?:\s+(?P<note>[A-Za-z0-9.]+))?$",
             label,
         )
         if not match:
             return label, code, note
 
         repaired_label = self._clean_statement_label(match.group("label"))
-        repaired_code = match.group("code")
+        repaired_code = self._normalize_statement_code(match.group("code"))
         repaired_note = self._normalize_statement_note(note or match.group("note"))
         return repaired_label, repaired_code, repaired_note
 

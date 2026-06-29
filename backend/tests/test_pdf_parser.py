@@ -488,6 +488,46 @@ def test_statement_tables_reconstruct_missing_total_assets_before_liabilities():
     assert row["values"]["2024"] == 212972002.0
 
 
+def test_statement_tables_keep_alphanumeric_equity_breakdown_codes():
+    parser = PDFParser()
+    pages = [
+        """
+        BANG CAN DOI KE TOAN HOP NHAT
+        400 VON CHU SO HUU 8.401.289 10.961.484
+        410 Von chu so huu 28 8.401.289 10.961.484
+        421 Loi nhuan sau thue chua phan phoi (81.992.839) (129.786.304)
+        421a - Lo luy ke den cuoi nam truoc (19.934.603) (100.737.591)
+        421b - Lo nam nay (62.058.236) (29.048.713)
+        429 Loi ich co dong khong kiem soat (24.895) 419
+        440 TONG CONG NGUON VON 221.761.361 212.972.002
+        """,
+    ]
+
+    tables = parser._build_statement_tables(pages, ["2025", "2024"])
+    table = next(table for table in tables if table["key"] == "financial_position")
+    by_code = {row["code"]: row for row in table["rows"]}
+
+    assert {"421", "421a", "421b"}.issubset(by_code)
+    assert by_code["421a"]["parent_code"] == "421"
+    assert by_code["421b"]["parent_code"] == "421"
+    assert by_code["421a"]["values"]["2025"] == -19934603.0
+    assert by_code["421a"]["values"]["2024"] == -100737591.0
+    assert by_code["421b"]["values"]["2025"] == -62058236.0
+    assert by_code["421b"]["values"]["2024"] == -29048713.0
+
+
+def test_statement_rows_normalize_uppercase_alphanumeric_codes():
+    parser = PDFParser()
+    line = "421A - Lo luy ke den cuoi nam truoc (19.934.603) (100.737.591)"
+
+    row = parser._parse_statement_table_row(line, 9, ["2025", "2024"], "financial_position")
+
+    assert row is not None
+    assert row["code"] == "421a"
+    assert row["values"]["2025"] == -19934603.0
+    assert row["values"]["2024"] == -100737591.0
+
+
 def test_statement_rows_keep_single_period_receivable_loan_line():
     parser = PDFParser()
     line = "135 3. Phai thu ve cho vay ngan han 36.3 1.914.106"
