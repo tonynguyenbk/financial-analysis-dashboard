@@ -180,7 +180,7 @@ def test_report_navigation_uses_table_of_contents_and_resolves_actual_pages():
     assert by_title["bao cao kiem toan doc lap"]["page"] == 6
     assert by_title["bang can doi ke toan hop nhat"]["page"] == 8
     assert by_title["bao cao ket qua hoat dong kinh doanh hop nhat"]["page"] == 12
-    assert by_title["thuyet minh bao cao tai chinh hop nhat"]["page"] == 18
+    assert "thuyet minh bao cao tai chinh hop nhat" not in by_title
 
 
 def test_statement_tables_extract_main_numeric_statement_rows():
@@ -218,6 +218,27 @@ def test_statement_tables_extract_main_numeric_statement_rows():
     assert by_key["income_statement"]["rows"][1]["values"]["2024"] == -31935669.0
     assert by_key["cash_flow"]["rows"][1]["code"] == "20"
     assert by_key["cash_flow"]["rows"][1]["values"]["2025"] == -18617631.0
+
+
+def test_statement_tables_prefer_statement_header_periods_over_filing_year_noise():
+    parser = PDFParser()
+    pages = [
+        """
+        CONSOLIDATED BALANCE SHEET
+        Code Note 31 December 2025 VND 31 December 2024 VND
+        100 CURRENT ASSETS 58.137.438.254.000 45.535.942.846.000
+        440 TOTAL RESOURCES 88.141.991.634.625 71.999.995.678.620
+        """,
+    ]
+
+    tables = parser._build_statement_tables(pages, ["2026", "2025"])
+    table = next(table for table in tables if table["key"] == "financial_position")
+
+    assert table["columns"][3]["key"] == "2025"
+    assert table["columns"][3]["label"] == "31/12/2025"
+    assert table["columns"][4]["key"] == "2024"
+    assert table["columns"][4]["label"] == "31/12/2024"
+    assert table["rows"][0]["values"]["2025"] == 58137438254000.0
 
 
 def test_primary_statement_pages_are_targeted_from_table_of_contents():

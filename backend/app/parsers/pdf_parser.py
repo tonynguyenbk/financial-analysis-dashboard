@@ -23,6 +23,16 @@ from app.schemas.financial import FinancialStatement
 
 YEAR_PATTERN = re.compile(r"\b(?:19|20)\d{2}\b")
 DATE_PATTERN = re.compile(r"\b(0?[1-9]|[12]\d|3[01])[\-/\.](0?[1-9]|1[0-2])[\-/\.]((?:19|20)\d{2})\b")
+WRITTEN_VI_DATE_PATTERN = re.compile(
+    r"\b(0?[1-9]|[12]\d|3[01])\s+thang\s+(0?[1-9]|1[0-2])\s+nam\s+((?:19|20)\d{2})\b",
+    re.IGNORECASE,
+)
+WRITTEN_EN_DATE_PATTERN = re.compile(
+    r"\b(0?[1-9]|[12]\d|3[01])\s+"
+    r"(january|february|march|april|may|june|july|august|september|october|november|december)\s+"
+    r"((?:19|20)\d{2})\b",
+    re.IGNORECASE,
+)
 NUMBER_PATTERN = re.compile(
     r"\(?-?\d{1,3}(?:[,.]\d{3})+(?:[,.]\d+)?\)?|\(?-?\d+(?:[,.]\d+)?\)?"
 )
@@ -36,6 +46,37 @@ DEFAULT_OCR_LANGUAGES = "vie"
 DEFAULT_OCR_CONFIG = "--oem 1 --psm 6 -c preserve_interword_spaces=1"
 DEFAULT_TOC_SCAN_PAGES = 12
 PREVIEW_PROGRESS = 65
+MONTH_NAME_TO_NUMBER = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+}
+REPORT_PERIOD_CONTEXT_MARKERS = (
+    "as at",
+    "as of",
+    "tai ngay",
+    "nam ket thuc",
+    "nam tai chinh ket thuc",
+    "cho nam ket thuc",
+    "for the year ended",
+    "year ended",
+    "fiscal year ended",
+    "so cuoi nam",
+    "so dau nam",
+    "nam nay",
+    "nam truoc",
+    "current year",
+    "previous year",
+)
 DISCLOSURE_NAVIGATION_MARKERS = (
     "notes to the financial statements",
     "thuyet minh bao cao tai chinh",
@@ -752,13 +793,23 @@ class PDFParser(FinancialStatementParser):
         periods: list[str] = []
         seen: set[str] = set()
 
-        for day, month, year_text in DATE_PATTERN.findall(value):
+        def add_period_from_date(day: str, month: int | str, year_text: str) -> None:
             year = int(year_text)
             period_year = year - 1 if int(day) == 1 and int(month) == 1 else year
             period = str(period_year)
             if period not in seen:
                 periods.append(period)
                 seen.add(period)
+
+        for day, month, year_text in DATE_PATTERN.findall(value):
+            add_period_from_date(day, month, year_text)
+
+        normalized_value = normalize_label(value)
+        for day, month, year_text in WRITTEN_VI_DATE_PATTERN.findall(normalized_value):
+            add_period_from_date(day, month, year_text)
+
+        for day, month_name, year_text in WRITTEN_EN_DATE_PATTERN.findall(normalized_value):
+            add_period_from_date(day, MONTH_NAME_TO_NUMBER[month_name.lower()], year_text)
 
         if len(periods) >= 2:
             return periods
@@ -772,10 +823,17 @@ class PDFParser(FinancialStatementParser):
     def _infer_default_periods(self, file_name: str, text: str) -> list[str]:
         file_years = self._filter_report_years(int(year) for year in self._years_in_text(file_name))
         if file_years:
-            latest = max(file_years)
+            latest = self._select_fallback_report_year(file_years)
             return [str(latest), str(latest - 1)]
 
-        candidates = [text[:4000]]
+        context_periods = self._infer_periods_from_context_lines(text[:6000], max_lines=120)
+        if len(context_periods) >= 2:
+            return context_periods[:2]
+        if len(context_periods) == 1 and context_periods[0].isdigit():
+            latest = int(context_periods[0])
+            return [str(latest), str(latest - 1)]
+
+        candidates = [text[:6000]]
         raw_years: list[int] = []
         for source in candidates:
             for year in self._years_in_text(source):
@@ -787,8 +845,15 @@ class PDFParser(FinancialStatementParser):
         if not years:
             return []
 
-        latest = max(years)
+        latest = self._select_fallback_report_year(years)
         return [str(latest), str(latest - 1)]
+
+    def _select_fallback_report_year(self, years: list[int]) -> int:
+        current_year = date.today().year
+        prior_years = [year for year in years if year < current_year]
+        if prior_years:
+            return max(prior_years)
+        return max(years)
 
     def _filter_report_years(self, years: Any) -> list[int]:
         current_year = date.today().year
@@ -796,6 +861,50 @@ class PDFParser(FinancialStatementParser):
         for year in years:
             if 1900 <= int(year) <= current_year and int(year) not in filtered:
                 filtered.append(int(year))
+        return filtered
+
+    def _infer_periods_from_context_lines(self, text: str, max_lines: int = 60) -> list[str]:
+        lines = [self._clean_statement_line(line) for line in str(text or "").splitlines()]
+        lines = [line for line in lines if line][:max_lines]
+        best_single_periods: list[str] = []
+
+        for window_size in (1, 2, 3, 4):
+            for start in range(0, max(0, len(lines) - window_size + 1)):
+                window = " ".join(lines[start : start + window_size])
+                normalized = normalize_label(window)
+                has_period_context = any(marker in normalized for marker in REPORT_PERIOD_CONTEXT_MARKERS)
+                periods = self._filter_period_labels(self._periods_in_text(window))
+                if (
+                    len(periods) >= 2
+                    and (has_period_context or self._looks_like_period_column_header(normalized))
+                    and self._periods_are_plausible_statement_pair(periods)
+                ):
+                    return periods[:2]
+                if has_period_context and periods and not best_single_periods:
+                    best_single_periods = periods[:1]
+
+        return best_single_periods
+
+    def _looks_like_period_column_header(self, normalized_text: str) -> bool:
+        markers = ("vnd", "ma so", "thuyet minh", "code", "note")
+        return any(marker in normalized_text for marker in markers)
+
+    def _periods_are_plausible_statement_pair(self, periods: list[str]) -> bool:
+        if len(periods) < 2 or not periods[0].isdigit() or not periods[1].isdigit():
+            return False
+        current = int(periods[0])
+        previous = int(periods[1])
+        return current - previous == 1
+
+    def _filter_period_labels(self, periods: list[str]) -> list[str]:
+        current_year = date.today().year
+        filtered: list[str] = []
+        for period in periods:
+            if not str(period).isdigit():
+                continue
+            year = int(period)
+            if 1900 <= year <= current_year and period not in filtered:
+                filtered.append(str(year))
         return filtered
 
     def _looks_like_period_header(self, text: str) -> bool:
@@ -845,17 +954,18 @@ class PDFParser(FinancialStatementParser):
         return extracted_pages
 
     def _build_statement_tables(self, pages: list[str], default_periods: list[str]) -> list[dict[str, Any]]:
-        periods = default_periods[:2]
-        if len(periods) < 2:
-            periods = self._infer_default_periods("", "\n".join(pages))[:2]
-        if len(periods) < 2:
-            periods = ["current", "previous"]
+        fallback_periods = default_periods[:2]
+        if len(fallback_periods) < 2:
+            fallback_periods = self._infer_default_periods("", "\n".join(pages))[:2]
+        if len(fallback_periods) < 2:
+            fallback_periods = ["current", "previous"]
 
         tables: list[dict[str, Any]] = []
         for spec in MAIN_STATEMENT_SPECS:
             page_indexes = self._find_statement_page_indexes_for_spec(pages, spec)
             statement_key = str(spec["key"])
             template_key = self._template_key_for_statement(statement_key, pages, page_indexes)
+            periods = self._infer_statement_periods(pages, page_indexes, fallback_periods)
             rows = self._extract_statement_table_rows(pages, page_indexes, periods, statement_key)
             rows = self._apply_statement_mapping(rows, statement_key, template_key)
             if not rows:
@@ -872,6 +982,25 @@ class PDFParser(FinancialStatementParser):
                 }
             )
         return tables
+
+    def _infer_statement_periods(
+        self,
+        pages: list[str],
+        page_indexes: list[int],
+        fallback_periods: list[str],
+    ) -> list[str]:
+        page_text = "\n".join(
+            pages[index]
+            for index in page_indexes
+            if 0 <= index < len(pages)
+        )
+        periods = self._infer_periods_from_context_lines(page_text, max_lines=45)
+        if len(periods) >= 2:
+            return periods[:2]
+        if len(periods) == 1 and periods[0].isdigit():
+            latest = int(periods[0])
+            return [str(latest), str(latest - 1)]
+        return fallback_periods[:2]
 
     def _template_key_for_statement(self, statement_key: str, pages: list[str], page_indexes: list[int]) -> str:
         if statement_key != "cash_flow":
