@@ -336,7 +336,7 @@ class PDFParser(FinancialStatementParser):
             progress_span=10,
             stage="toc",
             message_builder=lambda completed, total, page_index: (
-                f"Scanning PDF page {page_index + 1}/{page_count} for the table of contents ({completed}/{total})."
+                f"Scanning table of contents: PDF page {page_index + 1}/{page_count}."
             ),
         )
 
@@ -360,8 +360,7 @@ class PDFParser(FinancialStatementParser):
             progress_span=26,
             stage="primary_statements",
             message_builder=lambda completed, total, page_index: (
-                "Preparing primary financial statement page "
-                f"{completed}/{total} (PDF page {page_index + 1}/{page_count})."
+                f"Preparing primary financial statements: PDF page {page_index + 1}/{page_count}."
             ),
         )
 
