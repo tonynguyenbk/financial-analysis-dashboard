@@ -1245,7 +1245,7 @@ class PDFParser(FinancialStatementParser):
             if row:
                 rows.append(row)
 
-        return self._deduplicate_statement_rows(rows)
+        return self._deduplicate_statement_rows(rows, statement_key)
 
     def _parse_statement_table_row_with_hint(
         self,
@@ -1540,6 +1540,7 @@ class PDFParser(FinancialStatementParser):
 
     def _clean_statement_line(self, line: str) -> str:
         cleaned = " ".join(str(line or "").replace("\t", " ").split())
+        cleaned = re.sub(r"^[|_\-–—=\s]+(?=\d{2,3}\b)", "", cleaned)
         return cleaned.strip()
 
     def _clean_statement_label(self, label: str) -> str:
@@ -1842,16 +1843,52 @@ class PDFParser(FinancialStatementParser):
             updated["label"] = self._clean_statement_label(hint)
         return updated
 
-    def _deduplicate_statement_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _deduplicate_statement_rows(self, rows: list[dict[str, Any]], statement_key: str) -> list[dict[str, Any]]:
         deduped: list[dict[str, Any]] = []
-        seen: set[tuple[str, int]] = set()
+        index_by_key: dict[tuple[str, int], int] = {}
         for row in rows:
             key = (str(row.get("code") or ""), int(row.get("page") or 0))
-            if key in seen:
+            existing_index = index_by_key.get(key)
+            if existing_index is None:
+                index_by_key[key] = len(deduped)
+                deduped.append(row)
                 continue
-            seen.add(key)
-            deduped.append(row)
+
+            existing = deduped[existing_index]
+            if self._statement_row_confidence_score(row, statement_key) > self._statement_row_confidence_score(
+                existing,
+                statement_key,
+            ):
+                deduped[existing_index] = row
         return deduped
+
+    def _statement_row_confidence_score(self, row: dict[str, Any], statement_key: str) -> int:
+        label = str(row.get("label") or "")
+        normalized = normalize_label(label)
+        code = str(row.get("code") or "").strip()
+        values = row.get("values") if isinstance(row.get("values"), dict) else {}
+        value_count = sum(1 for value in values.values() if value is not None)
+        score = value_count * 20
+
+        if not self._statement_label_is_noise(label):
+            score += 10
+        else:
+            score -= 100
+
+        mapping_item = self._find_mapping_item_by_code(statement_key, code)
+        if mapping_item is not None:
+            score += 10
+            if mapping_item.normalized_label in normalized or normalized in mapping_item.normalized_label:
+                score += 60
+
+        inferred_code = self._infer_statement_code_from_label(label, statement_key)
+        if inferred_code == code:
+            score += 40
+
+        if code in {"100", "200", "270", "300", "400", "440"} and "tong" in normalized:
+            score += 20
+
+        return score
 
     def _build_report_navigation(self, pages: list[str]) -> list[dict[str, Any]]:
         toc_entries = self._extract_toc_navigation_entries(pages)

@@ -424,6 +424,43 @@ def test_statement_rows_do_not_extract_formula_numbers_as_notes():
     assert row["values"]["2025"] == 1312623193814.0
 
 
+def test_statement_rows_keep_total_assets_with_table_border_prefix():
+    parser = PDFParser()
+    pages = [
+        """
+        BANG CAN DOI KE TOAN HOP NHAT
+        | 270 TONG CONG TAI SAN 221.761.361 212.972.002
+        300 NO PHAI TRA 213.360.072 202.010.518
+        """,
+    ]
+
+    rows = parser._extract_statement_table_rows(pages, [0], ["2025", "2024"], "financial_position")
+    by_code = {row["code"]: row for row in rows}
+
+    assert by_code["270"]["label"] == "TONG CONG TAI SAN"
+    assert by_code["270"]["values"]["2025"] == 221761361.0
+    assert by_code["270"]["values"]["2024"] == 212972002.0
+
+
+def test_statement_rows_prefer_real_total_assets_over_same_page_noise():
+    parser = PDFParser()
+    pages = [
+        """
+        BANG CAN DOI KE TOAN HOP NHAT
+        270 Loi the thuong mai 19 37.923 46.580
+        — 270 TONG CONG TAI SAN 221.761.361 212.972.002
+        300 NO PHAI TRA 213.360.072 202.010.518
+        """,
+    ]
+
+    rows = parser._extract_statement_table_rows(pages, [0], ["2025", "2024"], "financial_position")
+    row = next(row for row in rows if row["code"] == "270")
+
+    assert row["label"] == "TONG CONG TAI SAN"
+    assert row["values"]["2025"] == 221761361.0
+    assert row["values"]["2024"] == 212972002.0
+
+
 def test_statement_rows_keep_single_period_receivable_loan_line():
     parser = PDFParser()
     line = "135 3. Phai thu ve cho vay ngan han 36.3 1.914.106"
