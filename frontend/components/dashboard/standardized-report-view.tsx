@@ -282,24 +282,25 @@ function MainStatementTables({
                       const totalLike = isStatementTotalRow(table.key, row.code);
                       const topRuleClass = totalLike ? "border-t border-neutral-950" : "";
                       const labelIndent = Math.max(0, rowLevel - 1) * 14;
+                      const rowPaddingClass = sectionLike ? "pb-[3px] pt-4" : "py-[3px]";
 
                       return (
                         <tr
                           key={`${table.key}-${row.page ?? "p"}-${row.code}-${row.label}-${rowIndex}`}
                         >
                           <td
-                            className={`py-[3px] pr-3 align-top ${topRuleClass} ${
+                            className={`${rowPaddingClass} pr-3 align-top ${topRuleClass} ${
                               emphasized ? "font-bold" : "font-normal"
-                            } ${sectionLike ? "pt-4 uppercase" : ""}`}
+                            } ${sectionLike ? "uppercase" : ""}`}
                             style={{ paddingLeft: `${labelIndent}px` }}
                             title={row.raw_label && row.raw_label !== row.label ? row.raw_label : undefined}
                           >
                             {row.label}
                           </td>
-                          <td className={`px-2 py-[3px] text-center align-top ${topRuleClass} ${emphasized ? "font-bold" : "font-normal"}`}>
+                          <td className={`px-2 ${rowPaddingClass} text-center align-top ${topRuleClass} ${emphasized ? "font-bold" : "font-normal"}`}>
                             {row.code}
                           </td>
-                          <td className={`px-2 py-[2px] text-center align-top ${topRuleClass}`}>
+                          <td className={`px-2 ${rowPaddingClass} text-center align-top ${topRuleClass}`}>
                             <EditableStatementCell
                               align="center"
                               value={row.note ?? null}
@@ -320,7 +321,7 @@ function MainStatementTables({
                           {valueColumns.map((column) => (
                             <td
                               key={`${row.code}-${column.key}`}
-                              className={`px-2 py-[2px] text-right align-top tabular-nums ${
+                              className={`px-2 ${rowPaddingClass} text-right align-top tabular-nums ${
                                 emphasized ? "font-bold" : "font-normal"
                               } ${topRuleClass}`}
                             >
