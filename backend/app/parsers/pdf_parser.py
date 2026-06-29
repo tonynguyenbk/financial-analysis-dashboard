@@ -174,6 +174,9 @@ class PDFParser(FinancialStatementParser):
         statement_tables = self._build_statement_tables(extracted["pages"], default_periods)
         statement_table_records = self._extract_records_from_statement_tables(statement_tables)
         records = self._deduplicate_records([*table_records, *text_records, *statement_table_records])
+        if self._ensure_financial_position_total_assets_row(statement_tables, records):
+            statement_table_records = self._extract_records_from_statement_tables(statement_tables)
+            records = self._deduplicate_records([*table_records, *text_records, *statement_table_records])
 
         if not records:
             raise ValueError(
@@ -590,6 +593,9 @@ class PDFParser(FinancialStatementParser):
         text_records = self._extract_records_from_text(text, default_periods)
         statement_table_records = self._extract_records_from_statement_tables(statement_tables)
         records = self._deduplicate_records([*text_records, *statement_table_records])
+        if self._ensure_financial_position_total_assets_row(statement_tables, records):
+            statement_table_records = self._extract_records_from_statement_tables(statement_tables)
+            records = self._deduplicate_records([*text_records, *statement_table_records])
         if not records:
             return None
 
@@ -996,6 +1002,163 @@ class PDFParser(FinancialStatementParser):
                 }
             )
         return tables
+
+    def _ensure_financial_position_total_assets_row(
+        self,
+        statement_tables: list[dict[str, Any]],
+        records: list[dict[str, Any]],
+    ) -> bool:
+        table = next(
+            (table for table in statement_tables if table.get("key") == "financial_position"),
+            None,
+        )
+        if table is None:
+            return False
+
+        rows = table.get("rows")
+        if not isinstance(rows, list) or any(str(row.get("code") or "").strip() == "270" for row in rows):
+            return False
+
+        periods = [
+            str(column.get("key"))
+            for column in table.get("columns", [])
+            if column.get("key") not in {"label", "code", "note"}
+        ]
+        if not periods:
+            return False
+
+        values = self._metric_values_from_records(records, "TOTAL_ASSETS", periods)
+        if not self._has_any_statement_value(values):
+            values = self._statement_values_by_code(table, "440", periods)
+        if not self._has_any_statement_value(values):
+            values = self._sum_statement_period_values(
+                self._statement_values_by_code(table, "300", periods),
+                self._statement_values_by_code(table, "400", periods),
+                periods,
+            )
+        if not self._has_any_statement_value(values):
+            values = self._sum_statement_period_values(
+                self._statement_values_by_code(table, "300", periods),
+                self._statement_values_by_code(table, "410", periods),
+                periods,
+            )
+        if not self._has_any_statement_value(values):
+            values = self._sum_statement_period_values(
+                self._metric_values_from_records(records, "TOTAL_LIABILITIES", periods),
+                self._metric_values_from_records(records, "TOTAL_EQUITY", periods),
+                periods,
+            )
+        if not self._has_any_statement_value(values):
+            return False
+
+        mapping_item = self._find_mapping_item_by_code(
+            "financial_position",
+            "270",
+            str(table.get("template_key") or "financial_position"),
+        )
+        mapping = get_statement_mapping()
+        reconstructed_row: dict[str, Any] = {
+            "code": "270",
+            "label": mapping_item.label if mapping_item is not None else "TONG CONG TAI SAN",
+            "note": None,
+            "values": values,
+            "page": self._statement_page_near_code(table, "300") or self._statement_page_near_code(table, "289"),
+            "raw_text": "Reconstructed TOTAL_ASSETS row from extracted balance sheet totals.",
+            "raw_label": "TONG CONG TAI SAN",
+            "reconstructed": True,
+            "reconstructed_from": "TOTAL_ASSETS",
+        }
+        if mapping_item is not None:
+            reconstructed_row.update(
+                {
+                    "template_label": mapping_item.label,
+                    "parent_code": mapping_item.parent_code,
+                    "level": mapping_item.level,
+                    "mapping_source": mapping.source_name,
+                    "mapping_row": mapping_item.row_number,
+                }
+            )
+
+        insert_index = self._statement_insert_index_before_code(rows, "300")
+        rows.insert(insert_index, reconstructed_row)
+        return True
+
+    def _metric_values_from_records(
+        self,
+        records: list[dict[str, Any]],
+        metric: str,
+        periods: list[str],
+    ) -> dict[str, float | None]:
+        values: dict[str, float | None] = {period: None for period in periods}
+        for record in records:
+            record_metric = record.get("metric") or record.get("label") or record.get("code")
+            if record_metric != metric and self._canonical_metric_from_text(record_metric) != metric:
+                continue
+
+            period = str(record.get("period") or record.get("fiscal_year") or "")
+            if period not in values:
+                continue
+
+            value = coerce_number(record.get("value"))
+            if value is not None:
+                values[period] = value
+        return values
+
+    def _statement_values_by_code(
+        self,
+        table: dict[str, Any],
+        code: str,
+        periods: list[str],
+    ) -> dict[str, float | None]:
+        values: dict[str, float | None] = {period: None for period in periods}
+        for row in table.get("rows", []):
+            if str(row.get("code") or "").strip() != code:
+                continue
+            row_values = row.get("values") if isinstance(row.get("values"), dict) else {}
+            for period in periods:
+                value = coerce_number(row_values.get(period))
+                if value is not None:
+                    values[period] = value
+        return values
+
+    def _sum_statement_period_values(
+        self,
+        left: dict[str, float | None],
+        right: dict[str, float | None],
+        periods: list[str],
+    ) -> dict[str, float | None]:
+        values: dict[str, float | None] = {period: None for period in periods}
+        for period in periods:
+            left_value = coerce_number(left.get(period))
+            right_value = coerce_number(right.get(period))
+            if left_value is None or right_value is None:
+                continue
+            values[period] = left_value + right_value
+        return values
+
+    def _has_any_statement_value(self, values: dict[str, float | None]) -> bool:
+        return any(value is not None for value in values.values())
+
+    def _statement_insert_index_before_code(self, rows: list[dict[str, Any]], code: str) -> int:
+        target_number = self._statement_code_number(code)
+        for index, row in enumerate(rows):
+            row_number = self._statement_code_number(row.get("code"))
+            if target_number is not None and row_number is not None and row_number >= target_number:
+                return index
+        return len(rows)
+
+    def _statement_page_near_code(self, table: dict[str, Any], code: str) -> int | None:
+        for row in table.get("rows", []):
+            if str(row.get("code") or "").strip() == code:
+                try:
+                    return int(row.get("page") or 0) or None
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    def _statement_code_number(self, code: Any) -> int | None:
+        match = re.match(r"\d+", str(code or "").strip())
+        return int(match.group(0)) if match else None
 
     def _infer_statement_periods(
         self,

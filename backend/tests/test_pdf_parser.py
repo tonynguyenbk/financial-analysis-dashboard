@@ -461,6 +461,33 @@ def test_statement_rows_prefer_real_total_assets_over_same_page_noise():
     assert row["values"]["2024"] == 212972002.0
 
 
+def test_statement_tables_reconstruct_missing_total_assets_before_liabilities():
+    parser = PDFParser()
+    pages = [
+        """
+        BANG CAN DOI KE TOAN HOP NHAT
+        254 Du phong dau tu tai chinh dai han (937.268) -
+        255 Dau tu nam giu den ngay dao han 5.312 5.312
+        261 Chi phi tra truoc dai han 802.581 1.848.632
+        289 Loi the thuong mai 37.923 46.580
+        300 NO PHAI TRA 213.360.072 202.010.518
+        400 VON CHU SO HUU 8.401.289 10.961.484
+        """,
+    ]
+
+    tables = parser._build_statement_tables(pages, ["2025", "2024"])
+    inserted = parser._ensure_financial_position_total_assets_row(tables, [])
+    table = next(table for table in tables if table["key"] == "financial_position")
+    codes = [row["code"] for row in table["rows"]]
+    row = next(row for row in table["rows"] if row["code"] == "270")
+
+    assert inserted is True
+    assert codes.index("270") < codes.index("300")
+    assert row["reconstructed"] is True
+    assert row["values"]["2025"] == 221761361.0
+    assert row["values"]["2024"] == 212972002.0
+
+
 def test_statement_rows_keep_single_period_receivable_loan_line():
     parser = PDFParser()
     line = "135 3. Phai thu ve cho vay ngan han 36.3 1.914.106"
